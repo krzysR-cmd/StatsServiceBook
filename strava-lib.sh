@@ -444,12 +444,18 @@ ensure_session_cookie() {
   fi
 
   log "fetching Strava CSRF token from dashboard..."
-  curl_retry -fsS \
+  _sc_http_code="$(curl_retry -fsS \
     -b "$_sc_cookie_file" \
     -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36" \
     "https://www.strava.com/dashboard" \
     -o "$TMP/sc_dashboard.html" \
+    -w '%{http_code}')" \
     || die "failed to fetch Strava dashboard — check network connectivity"
+
+  _sc_response_bytes="$(wc -c < "$TMP/sc_dashboard.html" | tr -d '[:space:]')"
+  if [ "$_sc_response_bytes" -eq 0 ]; then
+    die "Strava dashboard returned an empty response (HTTP ${_sc_http_code:-unknown}); check whether Strava is responding normally and whether the session cookie is still valid"
+  fi
 
   # Detect expired cookie: Strava silently redirects to the login page (HTTP 200).
   if grep -qiE 'Log In to Strava|id="login-form"|action="/session"' "$TMP/sc_dashboard.html" 2>/dev/null; then

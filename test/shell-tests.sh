@@ -1831,6 +1831,49 @@ else
     err "$S" "no-token-empty-output" "expected empty, got: $_no_token"
 fi
 
+# An empty HTTP 200 response is not a layout change; exercise the real function
+# with a mocked curl so the diagnostic includes the response status.
+S="scrape-empty-dashboard-response"
+_sc_lib=""
+for _sc_lib_path in /usr/bin/strava-lib.sh /opt/strava-lib.sh \
+    "$(dirname "$0")/../strava-lib.sh" "$(dirname "$0")/strava-lib.sh"; do
+    if [ -f "$_sc_lib_path" ]; then
+        _sc_lib="$_sc_lib_path"
+        break
+    fi
+done
+if [ -n "$_sc_lib" ]; then
+    _sc_mock_bin="$TMP/sc-mock-bin"
+    _sc_test_dir="$TMP/sc-empty-response"
+    mkdir -p "$_sc_mock_bin" "$_sc_test_dir/state" "$_sc_test_dir/tmp"
+    cat > "$_sc_mock_bin/curl" <<'MOCK_CURL'
+#!/bin/sh
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output="$2"; shift 2 ;;
+        -w) shift 2 ;;
+        *) shift ;;
+    esac
+done
+: > "$output"
+printf '200'
+MOCK_CURL
+    chmod 0755 "$_sc_mock_bin/curl"
+    _sc_error="$_sc_test_dir/error.txt"
+    if PATH="$_sc_mock_bin:$PATH" STRAVA_SESSION_COOKIE=test \
+        STATE_DIR="$_sc_test_dir/state" TMP="$_sc_test_dir/tmp" \
+        sh -c '. "$1"; log() { :; }; ensure_session_cookie' sh "$_sc_lib" \
+        2> "$_sc_error"; then
+        err "$S" "empty-response-diagnostic" "expected ensure_session_cookie to fail"
+    elif grep -q 'empty response (HTTP 200)' "$_sc_error"; then
+        ok "$S" "empty-response-diagnostic"
+    else
+        err "$S" "empty-response-diagnostic" "unexpected error: $(cat "$_sc_error")"
+    fi
+else
+    err "$S" "library-found" "could not locate strava-lib.sh"
+fi
+
 # ── scrape-session-age ────────────────────────────────────────────────────────
 # Mirrors the CSRF-cache reuse guard in ensure_session_cookie:
 #   [ "$(( $(date +%s) - _sc_ts ))" -lt 2160000 ]  (25 days = 2160000 s)

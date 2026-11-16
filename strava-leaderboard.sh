@@ -88,6 +88,7 @@ _SYNC_RUN_ID="$(date +%s)-$$"
 printf '1' > "$_RUNNING_FLAG" 2>/dev/null || true
 write_sync_status() {
   _rc=$?
+  [ "$_rc" -eq 0 ] || log "FATAL: strava-leaderboard exited with code $_rc"
   _now="$(date +%s)"
   _start_time="${_SYNC_RUN_ID%%-*}"
   _duration=$(( _now - _start_time ))
@@ -112,7 +113,6 @@ write_sync_status() {
   mv "$_status_tmp" "$WEB_DIR/leaderboard-sync-status.json"
   printf '0' > "$_RUNNING_FLAG" 2>/dev/null || true
   rm -rf "$TMP" "$LOCKFILE"
-  [ "$_rc" -eq 0 ] || log "FATAL: strava-leaderboard exited with code $_rc"
 }
 trap 'write_sync_status' EXIT
 
