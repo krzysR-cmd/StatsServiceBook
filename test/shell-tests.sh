@@ -1805,7 +1805,7 @@ fi
 S="scrape-csrf-extraction"
 
 _csrf_from_html() {
-    printf '%s' "$1" | awk -F'"' '/name="csrf-token"/{
+    printf '%s' "$1" | awk -F'"' '/name="csrf-token"|name="csrf"/{
         for(i=1;i<=NF;i++){if($i==" content=" || $i=="content="){print $(i+1);exit}}
     }'
 }
