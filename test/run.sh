@@ -70,6 +70,16 @@ chmod 0755 /www/cgi-bin/ride-goals
 awk '/^cat > "\$CGI_DIR\/trigger-sync" <<.CGI.$/{f=1;next} /^CGI$/{f=0} f' "$DATA_QUALITY" > /www/cgi-bin/trigger-sync
 chmod 0755 /www/cgi-bin/trigger-sync
 
+# update-cookie CGI: mirror the production config preamble and extract its body.
+{
+  echo '#!/bin/sh'
+  echo 'MY_CONF="/etc/strava-my-activities.conf"'
+  echo 'LB_CONF="/etc/strava-leaderboard.conf"'
+  echo 'MY_STATE_DIR="/data/strava-my-activities"'
+  awk '/^  cat <<.CGI.$/{f=1;next} f && /^CGI$/{exit} f' "$DATA_QUALITY"
+} > /www/cgi-bin/update-cookie
+chmod 0755 /www/cgi-bin/update-cookie
+
 # drive-auth CGI stub (no real Google credentials in the test container).
 {
   echo '#!/bin/sh'

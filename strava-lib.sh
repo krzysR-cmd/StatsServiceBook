@@ -444,30 +444,38 @@ ensure_session_cookie() {
   fi
 
   log "fetching Strava CSRF token from dashboard..."
-  _sc_http_code="$(curl_retry -fsS \
+  _sc_fetch_result="$(curl_retry -fsSL \
     -b "$_sc_cookie_file" \
     -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36" \
     "https://www.strava.com/dashboard" \
     -o "$TMP/sc_dashboard.html" \
-    -w '%{http_code}')" \
+    -w '%{http_code}|%{url_effective}')" \
     || die "failed to fetch Strava dashboard — check network connectivity"
+  _sc_http_code="${_sc_fetch_result%%|*}"
+  _sc_final_url="${_sc_fetch_result#*|}"
 
   _sc_response_bytes="$(wc -c < "$TMP/sc_dashboard.html" | tr -d '[:space:]')"
   if [ "$_sc_response_bytes" -eq 0 ]; then
     die "Strava dashboard returned an empty response (HTTP ${_sc_http_code:-unknown}); check whether Strava is responding normally and whether the session cookie is still valid"
   fi
 
-  # Detect expired cookie: Strava silently redirects to the login page (HTTP 200).
-  if grep -qiE 'Log In to Strava|id="login-form"|action="/session"' "$TMP/sc_dashboard.html" 2>/dev/null; then
+  # Strava's authenticated dashboard can contain "Log In to Strava" in translations.
+  # Use the final redirect URL and specific login form markers instead.
+  case "$_sc_final_url" in
+    */login|*/login\?*|*/session|*/session\?*)
+      die "STRAVA_SESSION_COOKIE has expired — Strava redirected to $_sc_final_url; copy a fresh _strava4_session value from browser DevTools into your config"
+      ;;
+  esac
+  if grep -qiE 'id="login-form"|action="/session"' "$TMP/sc_dashboard.html" 2>/dev/null; then
     die "STRAVA_SESSION_COOKIE has expired — Strava returned the login page; copy a fresh _strava4_session value from browser DevTools (Application → Cookies → strava.com → _strava4_session) into your config"
   fi
 
-  _sc_csrf_val="$(awk -F'"' '/name="csrf-token"/{
+  _sc_csrf_val="$(awk -F'"' '/name="csrf-token"|name="csrf"/{
     for(i=1;i<=NF;i++){if($i==" content=" || $i=="content="){print $(i+1);exit}}
   }' "$TMP/sc_dashboard.html")"
   if [ -z "$_sc_csrf_val" ]; then
     _sc_sample="$(head -c 400 "$TMP/sc_dashboard.html" | tr '\n\r' '  ')"
-    die "LAYOUT CHANGE DETECTED: csrf-token meta tag not found in Strava dashboard response (Strava may have changed their HTML structure); response starts: ${_sc_sample}; expected: <meta name=\"csrf-token\" content=\"...\">; if this persists, check if Strava redesigned the dashboard page"
+    die "LAYOUT CHANGE DETECTED: CSRF meta tag not found in Strava dashboard response (Strava may have changed their HTML structure); response starts: ${_sc_sample}; expected: <meta name=\"csrf-token\" or name=\"csrf\" content=\"...\">; if this persists, check if Strava redesigned the dashboard page"
   fi
 
   printf '%s\n' "$_sc_csrf_val" > "$_sc_csrf"

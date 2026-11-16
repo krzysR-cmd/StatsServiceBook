@@ -87,6 +87,7 @@ _RUN_LOG="$TMP/run-log.txt"
 _LIVE_LOG="$WEB_DIR/strava-sync-live.log"
 _LIVE_LOG_ACTIVE=""
 log() { logger -t strava "$*"; printf '%s [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(basename "$0")" "$*" | tee -a "$_RUN_LOG" ${_LIVE_LOG_ACTIVE:+"$_LIVE_LOG"}; }
+die() { log "ERROR: $*"; exit 1; }
 LOCKFILE="${TMPDIR:-/tmp}/strava-my-activities.lock"
 if ! mkdir "$LOCKFILE" 2>/dev/null; then
   _lock_pid="$(cat "$LOCKFILE/pid" 2>/dev/null || true)"

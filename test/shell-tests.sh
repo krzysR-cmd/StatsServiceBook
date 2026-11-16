@@ -1801,7 +1801,7 @@ fi
 
 # ── scrape-csrf-extraction ────────────────────────────────────────────────────
 # Mirrors the awk pattern in ensure_session_cookie that reads the CSRF token
-# from the Strava dashboard HTML.
+# from either Strava dashboard meta-tag name.
 S="scrape-csrf-extraction"
 
 _csrf_from_html() {
@@ -1814,6 +1814,11 @@ _csrf_from_html() {
 assert_eq "$S" "name-then-content" \
     "$(_csrf_from_html '<meta name="csrf-token" content="abc123XYZ"/>')" \
     "abc123XYZ"
+
+# Current Strava dashboard uses name="csrf".
+assert_eq "$S" "current-csrf-meta-name" \
+    "$(_csrf_from_html '<meta name="csrf" content="current123XYZ"/>')" \
+    "current123XYZ"
 
 # content before name: the awk pattern checks for " content=" as a quoted-field
 # prefix, so when content= merges with the tag opener (<meta content=) it is not
@@ -1856,7 +1861,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 : > "$output"
-printf '200'
+    printf '200|https://www.strava.com/dashboard'
 MOCK_CURL
     chmod 0755 "$_sc_mock_bin/curl"
     _sc_error="$_sc_test_dir/error.txt"
@@ -1869,6 +1874,72 @@ MOCK_CURL
         ok "$S" "empty-response-diagnostic"
     else
         err "$S" "empty-response-diagnostic" "unexpected error: $(cat "$_sc_error")"
+    fi
+else
+    err "$S" "library-found" "could not locate strava-lib.sh"
+fi
+
+# A translated "Log In to Strava" string appears on the authenticated dashboard;
+# it must not be mistaken for a login page.
+S="scrape-dashboard-login-translation"
+if [ -n "$_sc_lib" ]; then
+    _sc_translation_dir="$_sc_test_dir/translation"
+    mkdir -p "$_sc_translation_dir/state" "$_sc_translation_dir/tmp"
+    cat > "$_sc_mock_bin/curl" <<'MOCK_CURL'
+#!/bin/sh
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output="$2"; shift 2 ;;
+        -w) shift 2 ;;
+        *) shift ;;
+    esac
+done
+printf '<html><p>Log In to Strava</p><meta name="csrf" content="safe-test-token"></html>\n' > "$output"
+printf '200|https://www.strava.com/dashboard?dashboard_next=1'
+MOCK_CURL
+    chmod 0755 "$_sc_mock_bin/curl"
+    _sc_error="$_sc_translation_dir/error.txt"
+    if PATH="$_sc_mock_bin:$PATH" STRAVA_SESSION_COOKIE=test \
+        STATE_DIR="$_sc_translation_dir/state" TMP="$_sc_translation_dir/tmp" \
+        sh -c '. "$1"; log() { :; }; ensure_session_cookie' sh "$_sc_lib" \
+        2> "$_sc_error"; then
+        assert_eq "$S" "dashboard-phrase-not-login" \
+            "$(cat "$_sc_translation_dir/state/strava_csrf.txt")" "safe-test-token"
+    else
+        err "$S" "dashboard-phrase-not-login" "unexpected error: $(cat "$_sc_error")"
+    fi
+else
+    err "$S" "library-found" "could not locate strava-lib.sh"
+fi
+
+# Follow redirects and identify a final login URL, even when login markup changes.
+S="scrape-dashboard-redirect-login"
+if [ -n "$_sc_lib" ]; then
+    _sc_redirect_dir="$_sc_test_dir/redirect-login"
+    mkdir -p "$_sc_redirect_dir/state" "$_sc_redirect_dir/tmp"
+    cat > "$_sc_mock_bin/curl" <<'MOCK_CURL'
+#!/bin/sh
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output="$2"; shift 2 ;;
+        -w) shift 2 ;;
+        *) shift ;;
+    esac
+done
+printf '<html><form id="login-form"></form></html>\n' > "$output"
+printf '200|https://www.strava.com/login'
+MOCK_CURL
+    chmod 0755 "$_sc_mock_bin/curl"
+    _sc_error="$_sc_redirect_dir/error.txt"
+    if PATH="$_sc_mock_bin:$PATH" STRAVA_SESSION_COOKIE=test \
+        STATE_DIR="$_sc_redirect_dir/state" TMP="$_sc_redirect_dir/tmp" \
+        sh -c '. "$1"; log() { :; }; ensure_session_cookie' sh "$_sc_lib" \
+        2> "$_sc_error"; then
+        err "$S" "redirected-login-diagnostic" "expected redirected login page to fail"
+    elif grep -q 'STRAVA_SESSION_COOKIE has expired' "$_sc_error"; then
+        ok "$S" "redirected-login-diagnostic"
+    else
+        err "$S" "redirected-login-diagnostic" "unexpected error: $(cat "$_sc_error")"
     fi
 else
     err "$S" "library-found" "could not locate strava-lib.sh"

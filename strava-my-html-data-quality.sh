@@ -22,11 +22,11 @@ chmod 0755 "$CGI_DIR/trigger-sync"
 log "wrote $CGI_DIR/trigger-sync"
 
 {
+  printf '#!/bin/sh\n'
   printf 'MY_CONF="/etc/strava-my-activities.conf"\n'
   printf 'LB_CONF="/etc/strava-leaderboard.conf"\n'
   printf 'MY_STATE_DIR="%s"\n' "$STATE_DIR"
   cat <<'CGI'
-#!/bin/sh
 printf 'Content-Type: application/json\r\n\r\n'
 [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}\n'; exit 0; }
 read -r _body 2>/dev/null || true
@@ -335,7 +335,18 @@ function saveCookie(){
   if(!val){statusEl.className='err';statusEl.textContent='Please paste a cookie value.';return;}
   statusEl.className='';statusEl.textContent='Saving...';
   fetch('/cgi-bin/update-cookie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookie:val})})
-  .then(function(r){return r.json();})
+  .then(function(r){
+    return r.text().then(function(text){
+      var j;
+      try{j=JSON.parse(text);}
+      catch(e){
+        var detail=text.trim().slice(0,240);
+        throw new Error('HTTP '+r.status+' returned a non-JSON response'+(detail?': '+detail:''));
+      }
+      if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+      return j;
+    });
+  })
   .then(function(j){
     if(j.ok){statusEl.className='ok';statusEl.textContent='✓ Cookie saved to '+(j.updated||'?')+' config file(s). Session cache cleared — next sync will use the new value.';document.getElementById('cookie-input').value='';}
     else{statusEl.className='err';statusEl.textContent='Error: '+(j.error||'unknown');}

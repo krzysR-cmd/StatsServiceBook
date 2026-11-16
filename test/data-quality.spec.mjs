@@ -750,6 +750,45 @@ test.describe("data-quality", () => {
     );
   });
 
+  test("cookie-save-shows-plain-text-server-error", async ({ page }) => {
+    await page.route("**/activities.json", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          activities: [],
+          scrapeMeta: { cookieRefreshNeededBy: "2099-01-01" },
+        }),
+      }),
+    );
+    await page.route("**/cgi-bin/update-cookie", (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "text/plain",
+        body: "Unable to execute CGI program",
+      }),
+    );
+    await page.goto(URLS.dataQuality, { waitUntil: "networkidle" });
+    await page.locator("#cookie-input").fill("session-value");
+    await page.getByRole("button", { name: "Save cookie" }).click();
+
+    await expect(page.locator("#cookie-save-status")).toHaveText(
+      "Request failed: HTTP 500 returned a non-JSON response: Unable to execute CGI program",
+    );
+    await expect(page.locator("#cookie-input")).toHaveValue("session-value");
+  });
+
+  test("cookie-update-cgi-executes-and-returns-json", async ({ page }) => {
+    const endpoint = new URL("/cgi-bin/update-cookie", URLS.dataQuality);
+    const response = await page.request.get(endpoint.toString());
+
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: "POST required",
+    });
+  });
+
   test("email-cards-show-failed-stale-and-partial-send-statuses", async ({
     page,
   }) => {
