@@ -350,7 +350,7 @@ jobs:
 
       - name: Add format-extensible test statistics
         if: always() && hashFiles('downloaded-results/*.json', 'downloaded-results/*.xml', 'downloaded-shell-report/*.xml') != ''
-        uses: raczeja/test-stats-gh-pages-action@ba8a0c77fb713068c72e892423b21becbc1c0902 # v1.1.1
+        uses: raczeja/test-stats-gh-pages-action@fed938d3b485c12726d7654902261591b7889eaf # 1.1.2
         with:
           result-files: |
             downloaded-results/*.json
@@ -360,6 +360,7 @@ jobs:
           stats-subdirectory: reusable-stats
           history-days: 30
           report-name: CI test results
+          dashboard-url: https://raczeja.github.io/StatsServiceBook/reusable-stats/
           detailed-statistics: "true"
           playwright-results-directory: downloaded-results
           shell-test-results: downloaded-shell-report/shell-tests.xml
