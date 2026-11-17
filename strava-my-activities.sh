@@ -203,7 +203,8 @@ log "merging $TOTAL fetched with $(wc -l < "$STORE" | tr -d ' ') stored activiti
 
 # Project each fetched activity to the compact store record.
 jq '[ .[] | {
-      id:                     .id,
+      id:                     (if (.id_str // "") != "" then (.id_str | tostring)
+                               elif .id != null then (.id | tostring) else null end),
       date:                   ((.start_date_local // .start_date // "") | .[0:10]),
       name:                   (.name // ""),
       sport_type:             (.sport_type // .type // ""),

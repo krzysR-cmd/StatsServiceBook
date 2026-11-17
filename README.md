@@ -100,6 +100,7 @@ card for synch is also not updated when Sync C| **Data completeness** | `/strava
 **Data management**
 
 - Historical sync: renamed rides, corrected sport types, deleted activities all reflected automatically
+- Strava API activity and athlete IDs prefer Strava's `id_str` values and are kept as strings, avoiding precision loss with 64-bit IDs; older stored numeric IDs remain supported.
 - Per-activity detail backfill: fetches full activity JSON (`/activities/{id}`) gradually over nightly runs
 - Scrape mode: auto-exports GPX per activity; Walk/Run/Hike detail pages show per-km splits computed from GPX; **health alert emails** sent to `STRAVA_MY_BIKE_EMAIL` on Strava layout changes, cookie expiry, or data-normalization failures (rate-limited to once/day); cookie health (green/amber/red) and cookie update form live on the Data completeness page
 - HealthSync + Magene dual-source: watch HR merged with wheel-sensor distance from Magene FIT files

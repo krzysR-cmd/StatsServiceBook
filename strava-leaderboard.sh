@@ -301,14 +301,16 @@ while IFS= read -r club_id; do
                    stats: (.stats // []),
                    athlete: {firstName: (.athlete_firstname // ""),
                              athleteName: (.athlete_name // ""),
-                             athleteId: (.athlete_id // ""),
+                             athleteId: (.athlete_id_str // .athlete_id // ""),
                              avatarUrl: (.athlete_avatar_url // "")},
                    activityName: (.name // ""),
                    type: (.type // ""),
                    startDate: (.start_date // ""),
                    elapsedTime: (.elapsed_time // 0)}
            else .activity
-                | . + {athlete: ((.athlete // {}) + {
+                | . + {id: (if (.id_str // "") != "" then (.id_str | tostring)
+                             elif .id != null then (.id | tostring) else null end),
+                       athlete: ((.athlete // {}) + {
                                   athleteName: (((.athlete.firstName // "") + " " + (.athlete.lastName // "")) | ltrimstr(" ") | rtrimstr(" "))}),
                        elapsedTime: (.elapsed_time // 0)}
            end)
@@ -332,7 +334,7 @@ while IFS= read -r club_id; do
         | ($s2 | parse_time) as $pt2
         | (.athlete.firstName // "") as $fn
         | (.athlete.athleteName // "") as $an
-        | (.athlete.athleteId // "") as $aid_raw
+        | (.athlete.athleteId_str // .athlete.id_str // .athlete.athleteId // .athlete.id // "") as $aid_raw
         | (if ($aid_raw | tostring) != "" and ($aid_raw | tostring) != "null"
            then ($aid_raw | tostring)
            else ((.athlete.avatarUrl // "") | avatar_id) end) as $aid
@@ -559,9 +561,12 @@ while IFS= read -r club_id; do
                 | {id: (.entity_id_str // ""),
                    athlete: {firstName: (.athlete_firstname // ""),
                              athleteName: (.athlete_name // ""),
+                             athleteId: (.athlete_id_str // .athlete_id // ""),
                              avatarUrl: (.athlete_avatar_url // "")}}
            else .activity
-                | . + {athlete: ((.athlete // {}) + {
+                | . + {id: (if (.id_str // "") != "" then (.id_str | tostring)
+                             elif .id != null then (.id | tostring) else null end),
+                       athlete: ((.athlete // {}) + {
                                   athleteName: (((.athlete.firstName // "") + " " + (.athlete.lastName // "")) | ltrimstr(" ") | rtrimstr(" "))})}
                 | {id: .id, athlete: .athlete}
            end)
@@ -569,6 +574,7 @@ while IFS= read -r club_id; do
         | (.athlete.firstName // "") as $fn
         | (.athlete.athleteName // "") as $an
         | {id: .id, fn: $fn, ln: ($an | ltrimstr($fn) | ltrimstr(" ")),
+           athlete_id: (.athlete.athleteId_str // .athlete.id_str // .athlete.athleteId // .athlete.id // ""),
            pm: (.athlete.avatarUrl // "")}
         | select(.ln != "" or .pm != "")
       ] as $ents

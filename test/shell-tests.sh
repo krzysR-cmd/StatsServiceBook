@@ -3189,6 +3189,50 @@ jq -e 'type == "array"' "$TMP/sc_bikes2.json" >/dev/null 2>&1 \
 assert_eq "$S" "missing-bikes-fallback-empty-array" \
     "$(jq 'length' "$TMP/sc_bikes2.json")" "0"
 
+# ── strava-api-id-strings ────────────────────────────────────────────────────
+# Exercise the exact API feed normalization against integers beyond JavaScript's
+# safe-integer range; id_str must win before jq can round the numeric id.
+S="strava-api-id-strings"
+_api_ids='[{"id":9007199254740992,"id_str":"9007199254740993","athlete":{"id":9007199254740992,"id_str":"9007199254740995"}}]'
+_api_ids_dir="$TMP/api-id-strings"
+mkdir -p "$_api_ids_dir"
+printf '%s\n' "$_api_ids" > "$_api_ids_dir/page.json"
+: > "$_api_ids_dir/all.ndjson"
+(
+    curl_retry() {
+        while [ "$#" -gt 0 ]; do
+            if [ "$1" = "-o" ]; then
+                cp "$_api_ids_dir/page.json" "$2"
+                return 0
+            fi
+            shift
+        done
+        return 1
+    }
+    log() { :; }
+    die() { err "$S" "api-feed-source" "$*"; return 1; }
+    TMP="$_api_ids_dir"
+    MAX_PAGES=1
+    PER_PAGE=200
+    ACCESS_TOKEN="test-token"
+    STRAVA_API_BASE="https://example.invalid"
+    page=1
+    reached_end=0
+    . /usr/bin/strava-my-feed-api.sh
+)
+_api_ids_out="$(cat "$_api_ids_dir/all.ndjson")"
+assert_eq "$S" "activity-id-str-wins" \
+    "$(printf '%s' "$_api_ids_out" | jq -r '.id')" "9007199254740993"
+assert_eq "$S" "athlete-id-str-wins" \
+    "$(printf '%s' "$_api_ids_out" | jq -r '.athlete.id')" "9007199254740995"
+assert_eq "$S" "normalized-ids-are-strings" \
+    "$(printf '%s' "$_api_ids_out" | jq -r '[.id,.athlete.id] | map(type) | unique | .[0]')" "string"
+assert_eq "$S" "legacy-id-fallback" \
+    "$(printf '%s' '{"id":12345}' | jq -r '
+      if (.id_str // "") != "" then (.id_str | tostring)
+      elif .id != null then (.id | tostring) else null end
+    ')" "12345"
+
 # ── scrape-distance-parsing ───────────────────────────────────────────────────
 # The scrape normalization uses split(",") | join(".") | try tonumber catch 0
 # to convert string km distances (possibly comma-decimal from locale) to meters.

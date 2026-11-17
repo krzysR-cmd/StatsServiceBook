@@ -92,7 +92,8 @@ while [ "$page" -le "$MAX_PAGES" ]; do
          else . end
        | if $web then . * 1000 else . end) as $dist
     | {
-        id:                   (.id // null),
+        id:                   (if (.id_str // "") != "" then (.id_str | tostring)
+                               elif .id != null then (.id | tostring) else null end),
         start_date_local:     $date,
         name:                 (.name // .title // ""),
         sport_type:           (.sport_type // .type // .sportType // ""),

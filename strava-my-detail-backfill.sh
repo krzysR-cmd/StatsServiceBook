@@ -86,7 +86,7 @@ if [ "$DETAIL_MAX_PER_RUN" -gt 0 ]; then
 
           # sport_type is already normalised in the store from the list fetch.
           _sc_sport="$(jq -rs --arg i "$id" \
-            '[.[] | select(.id == ($i|tonumber))] | .[0].sport_type // "Ride"' \
+            '[.[] | select((.id | tostring) == $i)] | .[0].sport_type // "Ride"' \
             "$STORE" 2>/dev/null)" || _sc_sport=""
           [ -n "$_sc_sport" ] || _sc_sport="Ride"
 
@@ -96,6 +96,7 @@ if [ "$DETAIL_MAX_PER_RUN" -gt 0 ]; then
               --argjson sad   "$(cat "$TMP/sc_sad.json")" \
               --argjson bikes "$(cat "$TMP/sc_bikes.json")" \
               --arg     sport "$_sc_sport" \
+              --arg     id    "$id" \
               '
                 $sad.efforts[0] as $e
                 | $e.activity_values.values as $v
@@ -104,7 +105,7 @@ if [ "$DETAIL_MAX_PER_RUN" -gt 0 ]; then
                 | (if $has_bike then "b\($bid | tostring)" else null end) as $gid
                 | ([$bikes[] | select(.id == $bid)] | if length > 0 then .[0].name else "Unknown Bike" end) as $bname
                 | {
-                    id:                    $e.activity_id,
+                    id:                    $id,
                     name:                  $e.activity_name,
                     sport_type:            $sport,
                     start_date_local:      ($e.start_date_local | strftime("%Y-%m-%dT%H:%M:%SZ")),
@@ -271,7 +272,7 @@ if [ "$DETAIL_MAX_PER_RUN" -gt 0 ]; then
               --arg  gid    "${_pv_gear_id:-}" \
               --arg  gname  "${_pv_gear_name:-}" \
               '{
-                id:                   ($id   | tonumber),
+                id:                   $id,
                 name:                 $name,
                 sport_type:           $sport,
                 start_date_local:     $date,
@@ -352,6 +353,25 @@ if [ "$DETAIL_MAX_PER_RUN" -gt 0 ]; then
     esac
     case "$code" in
       200)
+        if [ "$STRAVA_SOURCE" = "api" ]; then
+          if jq '
+            def exact_id:
+              if (.id_str // "") != "" then (.id_str | tostring)
+              elif .id != null then (.id | tostring)
+              else null end;
+            exact_id as $activity_id
+            | (if $activity_id != null then .id = $activity_id else . end)
+            | if (.athlete | type) == "object" then
+                .athlete |= (exact_id as $athlete_id
+                  | if $athlete_id != null then .id = $athlete_id else . end)
+              else . end
+          ' "$TMP/detail.json" > "$TMP/detail.normalized.json"; then
+            mv "$TMP/detail.normalized.json" "$TMP/detail.json"
+          else
+            log "detail backfill: activity $id returned unparseable body; will retry next run"
+            continue
+          fi
+        fi
         # Validate it parses before committing it to the (web-served) detail dir.
         if jq -e . "$TMP/detail.json" >/dev/null 2>&1; then
           mv "$TMP/detail.json" "$DETAIL_DIR/$id.json"

@@ -13,7 +13,21 @@ while [ "$page" -le "$MAX_PAGES" ]; do
   count="$(jq 'length' "$TMP/page.json" 2>/dev/null || echo 0)"
   [ "$count" -gt 0 ] || { log "page $page empty, stopping"; reached_end=1; break; }
 
-  jq -c '.[]' "$TMP/page.json" >> "$TMP/all.ndjson"
+  # jq cannot safely represent every 64-bit JSON integer. Prefer Strava's
+  # exact string fields before storing either activity or nested athlete IDs.
+  jq -c '
+    def exact_id:
+      if (.id_str // "") != "" then (.id_str | tostring)
+      elif .id != null then (.id | tostring)
+      else null end;
+    .[]
+    | exact_id as $activity_id
+    | (if $activity_id != null then .id = $activity_id else . end)
+    | if (.athlete | type) == "object" then
+        .athlete |= (exact_id as $athlete_id
+          | if $athlete_id != null then .id = $athlete_id else . end)
+      else . end
+  ' "$TMP/page.json" >> "$TMP/all.ndjson"
   log "page $page: $count activities"
 
   [ "$count" -lt "$PER_PAGE" ] && { log "short page, stopping"; reached_end=1; break; }
