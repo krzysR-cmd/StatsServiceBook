@@ -361,6 +361,30 @@ jobs:
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
 
+      - name: Add format-extensible test statistics
+        if: always() && hashFiles('downloaded-results/*.json', 'downloaded-results/*.xml', 'downloaded-shell-report/*.xml') != ''
+        uses: raczeja/test-stats-gh-pages-action@0d8f8a177a7b01ec311230da46112ca806b501e3 # v1.0.0
+        with:
+          result-files: |
+            downloaded-results/*.json
+            downloaded-results/*.xml
+            downloaded-shell-report/*.xml
+          site-directory: site
+          stats-subdirectory: reusable-stats
+          history-days: 30
+          report-name: CI test results
+
+      - name: Stage Playwright report
+        if: always() && hashFiles('downloaded-report/index.html') != ''
+        uses: raczeja/test-report-gh-pages-action@4647a3901f673973b4d7e2192cd0adf63ec511bc # v1.0.0
+        with:
+          report-directory: downloaded-report
+          site-directory: site
+          report-type: Playwright
+          destination: run-${{ github.run_number }}
+          run-number: ${{ github.run_number }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@329bcc8f12caed2cefe5a5b80781499a6f3b361b
         with:
@@ -410,6 +434,14 @@ jobs:
             out.write(
               "- [Test statistics — last 30 days]"
               "(https://raczeja.github.io/StatsServiceBook/stats/)\n"
+            )
+            out.write(
+              "- [Format-extensible test statistics]"
+              "(https://raczeja.github.io/StatsServiceBook/reusable-stats/)\n"
+            )
+            out.write(
+              "- [Published test reports index]"
+              "(https://raczeja.github.io/StatsServiceBook/reports.html)\n"
             )
             out.write(
               "- [Playwright JavaScript coverage]"

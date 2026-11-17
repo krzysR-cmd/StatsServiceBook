@@ -313,6 +313,7 @@ echo "[size] Final site size: $(site_size_mb)"
   echo '</div>'
   echo '<div class="page">'
   echo '<a class="stats-link" href="./stats/">📊 Test Statistics — last 30 days</a>'
+  echo '<a class="stats-link" href="./reusable-stats/">📋 Normalized Test Statistics</a>'
   echo '<a class="stats-link" href="./coverage/">📈 Playwright JavaScript Coverage</a>'
   echo '<div class="card">'
   echo '<h2>Recent runs</h2>'
