@@ -335,35 +335,22 @@ jobs:
           path: gh-pages-current
         continue-on-error: true
 
-      - name: Workflow repository scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Assemble and stage GitHub Pages content
+        if: always()
+        uses: raczeja/test-report-gh-pages-action@406477b9d493aa93a106e050dbd85878ac2662ae # v1.1.2
         with:
-          path: workflow-source
-
-      - name: Assemble Pages site
-        shell: bash
-        run: bash workflow-source/.github/workflows/scripts/assemble-pages-site.sh
-        env:
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          GITHUB_WORKFLOW_NAME: ${{ github.workflow }}
-          GITHUB_SHA_VALUE: ${{ github.sha }}
-          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-      - name: Update 30-day statistics
-        shell: bash
-        run: bash workflow-source/.github/workflows/scripts/update-stats.sh
-        env:
-          RESULTS_DIR: downloaded-results
-          SITE_DIR: site
-          SHELL_TESTS_XML: downloaded-shell-report/shell-tests.xml
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
+          report-directory: downloaded-report
+          site-directory: site
+          existing-site-directory: gh-pages-current
+          coverage-directory: downloaded-coverage
+          report-type: Playwright
+          destination: run-${{ github.run_number }}
+          run-number: ${{ github.run_number }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Add format-extensible test statistics
         if: always() && hashFiles('downloaded-results/*.json', 'downloaded-results/*.xml', 'downloaded-shell-report/*.xml') != ''
-        uses: raczeja/test-stats-gh-pages-action@0d8f8a177a7b01ec311230da46112ca806b501e3 # v1.0.0
+        uses: raczeja/test-stats-gh-pages-action@44196d517e7d7dc83eda284b60b15fef6a870edf # v1.1.1
         with:
           result-files: |
             downloaded-results/*.json
@@ -373,17 +360,9 @@ jobs:
           stats-subdirectory: reusable-stats
           history-days: 30
           report-name: CI test results
-
-      - name: Stage Playwright report
-        if: always() && hashFiles('downloaded-report/index.html') != ''
-        uses: raczeja/test-report-gh-pages-action@4647a3901f673973b4d7e2192cd0adf63ec511bc # v1.0.0
-        with:
-          report-directory: downloaded-report
-          site-directory: site
-          report-type: Playwright
-          destination: run-${{ github.run_number }}
-          run-number: ${{ github.run_number }}
-          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          detailed-statistics: "true"
+          playwright-results-directory: downloaded-results
+          shell-test-results: downloaded-shell-report/shell-tests.xml
 
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@329bcc8f12caed2cefe5a5b80781499a6f3b361b
