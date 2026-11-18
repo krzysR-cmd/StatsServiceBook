@@ -337,7 +337,7 @@ jobs:
 
       - name: Assemble and stage GitHub Pages content
         if: always()
-        uses: raczeja/test-report-gh-pages-action@v1.1.3
+        uses: raczeja/test-report-gh-pages-action@292e6ba138aedd28b171cd3960fbec746e7cb43e # v1.1.3
         with:
           report-directory: downloaded-report
           site-directory: site
@@ -350,7 +350,7 @@ jobs:
 
       - name: Add format-extensible test statistics
         if: always() && hashFiles('downloaded-results/*.json', 'downloaded-results/*.xml', 'downloaded-shell-report/*.xml') != ''
-        uses: raczeja/test-stats-gh-pages-action@v1.1.6
+        uses: raczeja/test-stats-gh-pages-action@fb384f6dcc9d42eb8867a5222509d485e71cdcf4 # v1.1.6
         with:
           result-files: |
             downloaded-results/*.json
