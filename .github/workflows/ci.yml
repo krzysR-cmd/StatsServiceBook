@@ -337,7 +337,7 @@ jobs:
 
       - name: Assemble and stage GitHub Pages content
         if: always()
-        uses: raczeja/test-report-gh-pages-action@406477b9d493aa93a106e050dbd85878ac2662ae # v1.1.2
+        uses: raczeja/test-report-gh-pages-action@v1.1.6
         with:
           report-directory: downloaded-report
           site-directory: site
