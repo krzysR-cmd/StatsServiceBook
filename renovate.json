@@ -46,5 +46,7 @@
   "vulnerabilityAlerts": {
     "enabled": true
   },
-  "dependencyDashboard": true
+  "dependencyDashboard": {
+    "enabled": true
+  }
 }
