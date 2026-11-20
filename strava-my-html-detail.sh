@@ -974,7 +974,7 @@ function renderCards(d){
   if (d.kilojoules)        html += card("Work", Math.round(d.kilojoules) + " kJ");
   if (d.calories)          html += card("Calories", Math.round(d.calories));
   if (d.suffer_score != null) html += cardTip("Strava Relative Effort", Math.round(d.suffer_score), "Official score supplied by Strava’s activity data.");
-  if (d.average_temp != null || d.wind_speed != null) {
+  if (d.average_temp != null || d.wind_speed != null || d.weathercode != null || d.precipitation != null) {
     var _ts = d.temp_source;
     var _srcLabel = _ts === "archive"   ? '<span class="wx-src wx-arch" title="Weather archive — historical data from Open-Meteo for the activity location and time.">hist</span>'
                   : _ts === "forecast"  ? '<span class="wx-src wx-fcst" title="Weather forecast — near-future estimate, upgraded to archive after ~7 days.">fcst</span>'
@@ -995,6 +995,22 @@ function renderCards(d){
              : (wc >= 95 && wc <= 99)            ? '⛈️'
              : '🌡️';
     }
+    var _weatherDesc = '';
+    if (d.weathercode != null) {
+      var wc = d.weathercode;
+      _weatherDesc = wc === 0 ? 'Clear'
+        : wc === 1 ? 'Mainly clear'
+        : wc === 2 ? 'Partly cloudy'
+        : wc === 3 ? 'Overcast'
+        : (wc === 45 || wc === 48) ? 'Fog'
+        : (wc >= 51 && wc <= 57) ? 'Drizzle'
+        : (wc >= 61 && wc <= 67) ? 'Rain'
+        : (wc >= 71 && wc <= 77) ? 'Snow'
+        : (wc >= 80 && wc <= 82) ? 'Rain showers'
+        : (wc >= 85 && wc <= 86) ? 'Snow showers'
+        : (wc >= 95 && wc <= 99) ? 'Thunderstorm'
+        : 'Conditions';
+    }
     var _windArrow = '';
     if (d.wind_dir != null) {
       var dirs = ['↑','↗','→','↘','↓','↙','←','↖'];
@@ -1002,8 +1018,12 @@ function renderCards(d){
     }
     var _tempVal = d.average_temp != null ? (_wIcon ? _wIcon + ' ' : '') + Math.round(d.average_temp) + ' °C' + (d.apparent_temp != null && Math.round(d.apparent_temp) !== Math.round(d.average_temp) ? ' <span style="color:var(--text-4);font-size:.8rem">feels ' + Math.round(d.apparent_temp) + '°</span>' : '') + ' ' + _srcLabel : '';
     var _windVal = d.wind_speed != null ? _windArrow + ' ' + Math.round(d.wind_speed) + ' km/h' + (d.precipitation != null && d.precipitation > 0 ? ' <span style="color:var(--text-4);font-size:.8rem">💧' + (+d.precipitation).toFixed(1) + ' mm</span>' : '') : '';
+    var _weatherVal = !_tempVal && (_weatherDesc || (d.precipitation != null && d.precipitation > 0))
+      ? (_wIcon ? _wIcon + ' ' : '') + _weatherDesc + (d.precipitation > 0 ? ' <span style="color:var(--text-4);font-size:.8rem">💧' + (+d.precipitation).toFixed(1) + ' mm</span>' : '')
+      : '';
     if (_tempVal) html += '<div class="card"><div class="k">Temp</div><div class="v">' + _tempVal + '</div></div>';
     if (_windVal) html += '<div class="card"><div class="k">Wind</div><div class="v">' + _windVal + '</div></div>';
+    if (_weatherVal) html += '<div class="card"><div class="k">Weather</div><div class="v">' + _weatherVal + '</div></div>';
   }
   if (d.gear && d.gear.name) html += card("Gear", esc(d.gear.name));
   if (d.device_name)       html += card("Device", esc(d.device_name));
