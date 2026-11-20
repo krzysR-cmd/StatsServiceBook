@@ -493,7 +493,11 @@ function _getTop10Metric(){
 function _drawTop10(){
   var metric=_getTop10Metric();
   var sub=document.getElementById('top10Subtitle');
-  if(sub) sub.textContent='— '+metric.label;
+  if(sub){
+    var sportLabel=selSport&&selSport!=='All'?selSport:'All sports';
+    var yearLabel=!selYear||selYear==='all'?'All years':selYear;
+    sub.textContent='— '+metric.label+' · '+sportLabel+' · '+yearLabel;
+  }
   var tbl=document.getElementById('top10Table');
   if(!tbl) return;
   var scored=[];
@@ -563,7 +567,13 @@ function _drawTop10(){
   tbl.innerHTML='<div style="overflow-x:auto"><table><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
 }
 function renderTop10(acts){
-  _top10Acts=acts;
+  // Apply the page filters defensively here too, so the Top section cannot
+  // accidentally include activities excluded by the sport/year selectors.
+  _top10Acts=(acts||[]).filter(function(a){
+    if(selSport&&selSport!=='All'&&a.sport_type!==selSport) return false;
+    if(selYear&&selYear!=='all'&&(!a.date||a.date.slice(0,4)!==String(selYear))) return false;
+    return true;
+  });
   var sel=document.getElementById('top10Sel');
   if(!sel) return;
   if(!_top10Inited){

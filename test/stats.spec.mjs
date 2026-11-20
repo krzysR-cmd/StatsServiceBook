@@ -1556,6 +1556,27 @@ test.describe("stats-top10", () => {
       `expected empty message for steps+Ride, got: "${text.slice(0, 80)}"`,
     ).toBeTruthy();
   });
+
+  test("top10-follows-year-and-sport-filters", async () => {
+    await page.selectOption("#sportSel", "Ride");
+    await page.selectOption("#yearSel", "2025");
+    await page.selectOption("#top10Sel", "distance");
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 200)));
+
+    const result = await page.evaluate(() => ({
+      subtitle: document.getElementById("top10Subtitle")?.textContent || "",
+      rows: Array.from(document.querySelectorAll("#top10Table tbody tr")).map((tr) =>
+        tr.children[1]?.textContent.trim()
+      ),
+    }));
+    expect(result.subtitle).toContain("Distance");
+    expect(result.subtitle).toContain("Ride");
+    expect(result.subtitle).toContain("2025");
+    expect(
+      result.rows.every((date) => date.startsWith("2025-")),
+      `expected Top 10 2025 dates only, got ${JSON.stringify(result.rows)}`,
+    ).toBeTruthy();
+  });
 });
 
 // ── Stats Month Navigation ─────────────────────────────────────────────────────

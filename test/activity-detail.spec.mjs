@@ -435,6 +435,26 @@ test.describe("activity-detail", () => {
     ).toBeTruthy();
   });
 
+  test("weather-code-shown-without-temperature", async () => {
+    const cards = await page.$eval("#cards", (el) => el.innerHTML);
+    try {
+      const text = await page.evaluate(() => {
+        renderCards({ weathercode: 61, average_temp: null, wind_speed: null });
+        return document.querySelector("#cards").textContent;
+      });
+      expect(text).toContain("Weather");
+      expect(text).toContain("Rain");
+    } finally {
+      await page.$eval(
+        "#cards",
+        (el, html) => {
+          el.innerHTML = html;
+        },
+        cards,
+      );
+    }
+  });
+
   test("weather-wind-card-shown", async () => {
     const text = await page.$eval(".cards", (el) => el.textContent);
     expect(
