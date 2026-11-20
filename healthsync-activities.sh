@@ -557,9 +557,8 @@ fi
 TOTAL="$(wc -l < "$STORE" | tr -d ' ')"
 log "store: +$ADDED new, $TOTAL total"
 
-# Seed weather cache from store records that already have full weather data,
-# then run the shared backfill (null-temp, enrichment, forecast→archive upgrade),
-# then apply any cache changes back to store records.
+# Seed the cache from existing weather records, refresh entries that predate the
+# full-weather cache version, then apply Open-Meteo data back to store records.
 log "weather: seeding cache from store..."
 [ -f "$WEATHER_CACHE" ] || printf '{}' > "$WEATHER_CACHE"
 jq -sc 'map(select(.average_temp != null and .wind_speed != null) |
@@ -576,16 +575,13 @@ jq -c --slurpfile wc "$WEATHER_CACHE" '
   . as $r |
   ($wc[0][.id|tostring]) as $c |
   if ($c | type) != "object" then .
-  elif $r.average_temp == null and ($c.t != null) then
-    . + {average_temp:$c.t, temp_source:$c.s,
+  elif $c.t != null then
+    . + {average_temp:$c.t, temp_source:($c.s // "archive"),
          apparent_temp:($c.at//null), wind_speed:($c.ws//null),
          wind_dir:($c.wd//null), weathercode:($c.wc//null), precipitation:($c.pr//null)}
-  elif $r.temp_source == "forecast" and $c.s == "archive" and ($c.t != null) then
-    . + {average_temp:$c.t, temp_source:"archive",
+  elif $c.v == 2 then
+    . + {temp_source:(if .average_temp != null then "device" else null end),
          apparent_temp:($c.at//null), wind_speed:($c.ws//null),
-         wind_dir:($c.wd//null), weathercode:($c.wc//null), precipitation:($c.pr//null)}
-  elif $r.wind_speed == null and ($c.ws != null) then
-    . + {apparent_temp:($c.at//null), wind_speed:$c.ws,
          wind_dir:($c.wd//null), weathercode:($c.wc//null), precipitation:($c.pr//null)}
   else . end
 ' "$STORE" > "$TMP/store_weather.ndjson" \

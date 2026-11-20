@@ -270,7 +270,7 @@ These functions exist beyond `log/die/ensure_access_token` — know them before 
 
 - **`_rw_coords id gpx_file detail_dir web_dir`** — resolves lat/lon for weather fetch. Five-priority chain: (1) `detail_dir/<id>.json` `.start_latlng`; (2) first `<trkpt>` in `web_dir/<gpx_file>`; (3) first `<trkpt>` in GPX referenced by detail JSON `.gpx_file` (scrape-mode path); (4) polyline decode from detail JSON `.map.summary_polyline`; (5) `WEATHER_LAT`/`WEATHER_LON` env vars. Sets `_wlat`/`_wlon`. All paths exit 0 under `set -eu`.
 
-- **`run_weather_backfill store cache tmp detail_dir web_dir`** — three-pass cache fill/upgrade. Pass 1: activities with `average_temp==null` not yet in cache → fetch all fields. Pass 2: activities with device temp but no extended cache entry → fetch extended fields. Pass 3: `s=="forecast"` entries older than 7 days → archive-only re-fetch (upgrade to `s=="archive"`). Entries with `s=="no-coord"` are never retried. Sets `_rw_changed` to the update count.
+- **`run_weather_backfill store cache tmp detail_dir web_dir`** — fetches full Open-Meteo weather for every activity with coordinates. Cache entries with `v==2` are complete and reused; older entries are refreshed. Entries with `s=="no-coord"` are retried as detail/GPX coordinates become available. Forecast temperatures older than 7 days are re-fetched archive-only. Sets `_rw_changed` to the update count.
 
 - **`ensure_session_cookie`** — scrape mode only. 25-day session validity window (2 160 000 s). Caches CSRF token to `$STATE_DIR/strava_csrf.txt` and cookies to `$STATE_DIR/strava_cookies.txt`. Empty or non-numeric timestamp is treated as 0 (expired).
 

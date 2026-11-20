@@ -2241,9 +2241,8 @@ else
 fi
 
 # ── set-eu-weather-conditionals ───────────────────────────────────────────────
-# Regression: '[ n -gt 0 ] && log "..."' exits 1 under BusyBox set -eu when
-# n=0 (AND-OR result 1 kills the script). Same for the Pass 2 continue guard.
-# Fix: if/fi form always exits 0 regardless of the condition.
+# Regression: zero-count checks use if/fi under BusyBox set -eu.
+# A failed test in an AND-OR list can otherwise end the function early.
 S="set-eu-weather-conditionals"
 
 cat > "$TMP/t_count_guard.sh" << 'EOF'
@@ -2260,95 +2259,73 @@ else
         "script did not reach 'done' — guard may have regressed to && form"
 fi
 
-cat > "$TMP/t_p2guard.sh" << 'EOF'
-#!/bin/sh
-set -eu
-_wlat="51.89"; _wlon="16.45"
-if [ -z "$_wlat" ] || [ -z "$_wlon" ]; then exit 1; fi
-echo "passed"
-EOF
-if sh "$TMP/t_p2guard.sh" 2>/dev/null | grep -q "passed"; then
-    ok "$S" "if/fi Pass 2 guard: exits 0 and passes through when both coords are set"
-else
-    err "$S" "if/fi Pass 2 guard: exits 0 and passes through when both coords are set" \
-        "script did not reach 'passed'"
-fi
-
-# ── weather-pass-uncached-count ───────────────────────────────────────────────
-# Pass 1 guard: skip only when object exists AND t != null (temp was fetched).
-# Pass 2 guard: skip only when object exists AND ws != null (extended fetched).
-# Both treat legacy plain-number entries and objects with null fields as uncached.
-S="weather-pass-uncached-count"
+# ── weather-cache-version ─────────────────────────────────────────────────────
+# Only v2 entries mean the complete Open-Meteo weather response was fetched.
+S="weather-cache-version"
 
 printf '{"id":"1","date":"2024-01-01"}\n{"id":"2","date":"2024-01-02"}\n{"id":"3","date":"2024-01-03"}\n' \
     > "$TMP/wpc_pending.ndjson"
-# Pass 1 guard: IDs 1+2 have t != null → excluded; ID 3 absent → counted = 1.
-printf '{"1":{"t":10,"s":"archive","at":12,"ws":5,"wd":180,"wc":0,"pr":0},"2":{"t":15,"s":"archive","at":16,"ws":8,"wd":90,"wc":2,"pr":0.5}}' \
+# A v2 record with no temperature is complete when its other fields were fetched.
+printf '{"1":{"v":2,"t":null,"s":"archive","at":12,"ws":5,"wd":180,"wc":0,"pr":0},"2":{"v":2,"t":15,"s":"archive","at":16,"ws":8,"wd":90,"wc":2,"pr":0.5}}' \
     > "$TMP/wpc_cache.json"
 _wpc_result=$(jq -s --slurpfile c "$TMP/wpc_cache.json" \
-    '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].t == null))] | length' \
+    '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].v != 2))] | length' \
     "$TMP/wpc_pending.ndjson")
-assert_eq "$S" "object-with-t excluded, absent entry counted" "$_wpc_result" "1"
+assert_eq "$S" "unversioned activity must fetch weather" "$_wpc_result" "1"
 
-# Pass 1 guard: all three have t → all excluded → count 0.
-printf '{"1":{"t":10,"s":"archive"},"2":{"t":15,"s":"archive"},"3":{"t":20,"s":"forecast"}}' \
+# A v2 cache entry is complete even when Open-Meteo has no temperature value.
+printf '{"1":{"v":2,"t":null,"s":"archive"},"2":{"v":2,"t":15,"s":"archive"},"3":{"v":2,"t":20,"s":"forecast"}}' \
     > "$TMP/wpc_full_cache.json"
 _wpc_full=$(jq -s --slurpfile c "$TMP/wpc_full_cache.json" \
-    '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].t == null))] | length' \
+    '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].v != 2))] | length' \
     "$TMP/wpc_pending.ndjson")
-assert_eq "$S" "all-object-with-t cache → uncached count is 0" "$_wpc_full" "0"
+assert_eq "$S" "all-v2 cache → incomplete count is 0" "$_wpc_full" "0"
 
 # Pass 1 guard: ID 2 is plain-number legacy → counted.
 printf '{"1":{"t":10,"s":"archive"},"2":28,"3":{"t":20,"s":"archive"}}' \
     > "$TMP/wpc_legacy_cache.json"
 _wpc_legacy=$(jq -s --slurpfile c "$TMP/wpc_legacy_cache.json" \
-    '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].t == null))] | length' \
+    '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].v != 2))] | length' \
     "$TMP/wpc_pending.ndjson")
-assert_eq "$S" "plain-number legacy entry counts as uncached" "$_wpc_legacy" "1"
+assert_eq "$S" "legacy entries refreshed with complete details" "$_wpc_legacy" "3"
 
-# Pass 1 guard: object with t == null treated as uncached (re-fetch needed).
-printf '{"1":{"t":10,"s":"archive"},"2":{"t":null,"s":null,"at":null,"ws":null},"3":{"t":20,"s":"archive"}}' \
-    > "$TMP/wpc_nullt_cache.json"
-_wpc_nullt=$(jq -s --slurpfile c "$TMP/wpc_nullt_cache.json" \
-    '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].t == null) or ($c[0][$i].s == ""))] | length' \
-    "$TMP/wpc_pending.ndjson")
-assert_eq "$S" "object-with-null-t counts as uncached" "$_wpc_nullt" "1"
-
-# Pass 1 guard: object with empty-string source treated as uncached (old-code bug).
-# Old code wrote s:"" when _fw_temp_source variable was unset; these must be re-fetched
-# so the source gets recorded correctly and extended fields get populated.
-printf '{"1":{"t":10,"s":"archive"},"2":{"t":25,"s":"","at":null,"ws":null},"3":{"t":20,"s":"archive"}}' \
-    > "$TMP/wpc_emptys_cache.json"
-_wpc_emptys=$(jq -s --slurpfile c "$TMP/wpc_emptys_cache.json" \
-    '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].t == null) or ($c[0][$i].s == ""))] | length' \
-    "$TMP/wpc_pending.ndjson")
-assert_eq "$S" "object-with-empty-source counts as uncached" "$_wpc_emptys" "1"
-
-# Pass 2 guard: object with ws != null → skip; object with ws == null → re-fetch.
-printf '{"1":{"at":12,"ws":5,"wd":180,"wc":0,"pr":0},"2":{"at":null,"ws":null,"wd":null,"wc":null,"pr":null},"3":{"at":14,"ws":8,"wd":90,"wc":2,"pr":0}}' \
-    > "$TMP/wpc_p2_cache.json"
-_wpc_p2=$(jq -s --slurpfile c "$TMP/wpc_p2_cache.json" \
-    '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].ws == null))] | length' \
-    "$TMP/wpc_pending.ndjson")
-assert_eq "$S" "Pass2: null-ws object counts as uncached" "$_wpc_p2" "1"
-
-# Pass 2 selection: activity with average_temp only in detail file (null in store) must qualify.
-# Strava's list endpoint omits average_temp; it only appears in the detail file, so the store
-# record has average_temp==null even though a device temperature is available.
-printf '{"id":100,"average_temp":19}\n' > "$TMP/wpc_detail_100.json"
-printf '{"id":100,"average_temp":null}\n{"id":200,"average_temp":null}\n{"id":300,"average_temp":22}\n' \
-    > "$TMP/wpc_p2sel_store.ndjson"
-jq -s 'map(select(.id != null and .average_temp != null) | {(.id|tostring): .average_temp}) | add // {}' \
-    "$TMP/wpc_detail_100.json" > "$TMP/wpc_p2_devtemp.json"
-_wpc_p2sel=$(jq -c --slurpfile dt "$TMP/wpc_p2_devtemp.json" \
-    'select(.average_temp != null or ($dt[0][(.id|tostring)] != null)) | .id' \
-    "$TMP/wpc_p2sel_store.ndjson" | tr '\n' ',')
-assert_eq "$S" "Pass2: detail-file temp selects store-null activity" \
-    "$(printf '%s' "$_wpc_p2sel" | grep -c '100' || true)" "1"
-assert_eq "$S" "Pass2: null-temp no detail → not selected" \
-    "$(printf '%s' "$_wpc_p2sel" | grep -c '200' || true)" "0"
-assert_eq "$S" "Pass2: store has temp → selected" \
-    "$(printf '%s' "$_wpc_p2sel" | grep -c '300' || true)" "1"
+# Previously missing coordinates can become available after activity details are fetched.
+# A cached "no-coord" result must not prevent a later Open-Meteo temperature fetch.
+S="weather-retry-after-coords-available"
+_wra="$TMP/weather-retry"
+mkdir -p "$_wra/details" "$_wra/web" "$_wra/tmp"
+printf '%s\n' \
+    '{"id":"late-coords","date":"2024-01-01","average_temp":null}' \
+    '{"id":"device-temp","date":"2024-01-02","average_temp":27}' \
+    > "$_wra/store.ndjson"
+printf '{"device-temp":{"t":27,"s":"device","ws":5}}' > "$_wra/cache.json"
+printf '{"id":"device-temp","start_latlng":[51.89,16.45]}\n' > "$_wra/details/device-temp.json"
+log() { :; }
+WEATHER_FETCHES=0
+fetch_weather_temp() {
+    WEATHER_FETCHES=$((WEATHER_FETCHES + 1))
+    _fw_t=18
+    _fw_temp_source="archive"
+    _fw_apparent_temp=16 _fw_wind_speed=8 _fw_wind_dir=225 _fw_weathercode=61 _fw_precipitation=2.4
+    printf '18\n'
+}
+run_weather_backfill "$_wra/store.ndjson" "$_wra/cache.json" "$_wra/tmp" "$_wra/details" "$_wra/web"
+assert_eq "$S" "missing coordinates initially cached" \
+    "$(jq -r '."late-coords".s' "$_wra/cache.json")" "no-coord"
+printf '{"id":"late-coords","start_latlng":[51.89,16.45]}\n' > "$_wra/details/late-coords.json"
+run_weather_backfill "$_wra/store.ndjson" "$_wra/cache.json" "$_wra/tmp" "$_wra/details" "$_wra/web"
+assert_eq "$S" "Open-Meteo retried after coordinates appear" \
+    "$(jq -r '."late-coords".t' "$_wra/cache.json")" "18"
+assert_eq "$S" "Meteo replaces cached device temp" \
+    "$(jq -r '."device-temp".t' "$_wra/cache.json")" "18"
+assert_eq "$S" "Meteo details cached" \
+    "$(jq -r '."device-temp".wc' "$_wra/cache.json")" "61"
+assert_eq "$S" "temperature source recorded" \
+    "$(jq -r '."late-coords".s' "$_wra/cache.json")" "archive"
+assert_eq "$S" "both activities fetched from Meteo" "$WEATHER_FETCHES" "2"
+run_weather_backfill "$_wra/store.ndjson" "$_wra/cache.json" "$_wra/tmp" "$_wra/details" "$_wra/web"
+assert_eq "$S" "complete weather cache avoids repeated fetches" "$WEATHER_FETCHES" "2"
+. "$_hr_lib"
 
 # ── weather-pass3-forecast-upgrade ───────────────────────────────────────────
 # Pass 3 filter selects cache entries with s=="forecast" where the activity
@@ -2376,10 +2353,9 @@ assert_eq "$S" "recent-forecast not selected" "$(printf '%s' "$_p3" | grep -c 'r
 assert_eq "$S" "archive not selected"         "$(printf '%s' "$_p3" | grep -c 'arch'   || true)" "0"
 
 # ── healthsync-cache-seeding ──────────────────────────────────────────────────
-# Before calling run_weather_backfill, healthsync seeds the cache from store
-# records that already have full weather (avg_temp != null AND wind_speed != null).
-# Records with only temp (no wind) are NOT seeded — Pass 2 will enrich them.
-# Existing cache entries win over newly seeded ones (so prior upgrades survive).
+# Before calling run_weather_backfill, HealthSync seeds any existing weather
+# fields from the store. The unversioned seed is refreshed from Open-Meteo.
+# Existing cache entries win over newly seeded ones.
 S="healthsync-cache-seeding"
 
 printf '%s\n' \
@@ -2417,33 +2393,31 @@ assert_eq "$S" "a4 not seeded (null temp)" \
     "$(jq 'has("a4")' "$TMP/hs_cache_after.json")" "false"
 
 # ── healthsync-store-apply ───────────────────────────────────────────────────
-# After run_weather_backfill, the cache is applied back to store records.
-# Three cases: null-temp fill, forecast→archive upgrade, extended-field enrichment.
+# After run_weather_backfill, Open-Meteo temperature and weather details take
+# precedence; device temperature remains the fallback when Meteo has no value.
 S="healthsync-store-apply"
 
 printf '%s\n' \
     '{"id":"n1","average_temp":null,"wind_speed":null}' \
     '{"id":"n2","average_temp":18,"temp_source":"forecast","wind_speed":5}' \
     '{"id":"n3","average_temp":22,"temp_source":"archive","wind_speed":null}' \
-    '{"id":"n4","average_temp":25,"temp_source":"archive","wind_speed":12}' \
+    '{"id":"n4","average_temp":25,"temp_source":"device","wind_speed":12}' \
+    '{"id":"n5","average_temp":null}' \
     > "$TMP/sa_store.ndjson"
-printf '{"n1":{"t":10,"s":"archive","at":9,"ws":7,"wd":270,"wc":3,"pr":1.5},"n2":{"t":19,"s":"archive","at":18,"ws":6,"wd":180,"wc":1,"pr":0},"n3":{"at":21,"ws":8,"wd":90,"wc":0,"pr":0},"n4":{"t":25,"s":"archive","at":24,"ws":11,"wd":0,"wc":0,"pr":0}}' \
+printf '{"n1":{"v":2,"t":10,"s":"archive","at":9,"ws":7,"wd":270,"wc":3,"pr":1.5},"n2":{"v":2,"t":19,"s":"archive","at":18,"ws":6,"wd":180,"wc":1,"pr":0},"n3":{"v":2,"t":null,"s":"archive","at":21,"ws":8,"wd":90,"wc":0,"pr":0},"n4":{"v":2,"t":25,"s":"archive","at":24,"ws":11,"wd":0,"wc":0,"pr":0},"n5":{"v":2,"t":null,"s":"archive","at":null,"ws":4,"wd":180,"wc":61,"pr":1.5}}' \
     > "$TMP/sa_cache.json"
 
 jq -c --slurpfile wc "$TMP/sa_cache.json" '
   . as $r |
   ($wc[0][.id|tostring]) as $c |
   if ($c | type) != "object" then .
-  elif $r.average_temp == null and ($c.t != null) then
-    . + {average_temp:$c.t, temp_source:$c.s,
+  elif $c.t != null then
+    . + {average_temp:$c.t, temp_source:($c.s // "archive"),
          apparent_temp:($c.at//null), wind_speed:($c.ws//null),
          wind_dir:($c.wd//null), weathercode:($c.wc//null), precipitation:($c.pr//null)}
-  elif $r.temp_source == "forecast" and $c.s == "archive" and ($c.t != null) then
-    . + {average_temp:$c.t, temp_source:"archive",
+  elif $c.v == 2 then
+    . + {temp_source:(if .average_temp != null then "device" else null end),
          apparent_temp:($c.at//null), wind_speed:($c.ws//null),
-         wind_dir:($c.wd//null), weathercode:($c.wc//null), precipitation:($c.pr//null)}
-  elif $r.wind_speed == null and ($c.ws != null) then
-    . + {apparent_temp:($c.at//null), wind_speed:$c.ws,
          wind_dir:($c.wd//null), weathercode:($c.wc//null), precipitation:($c.pr//null)}
   else . end
 ' "$TMP/sa_store.ndjson" > "$TMP/sa_out.ndjson"
@@ -2453,11 +2427,36 @@ _sa() { jq -r "select(.id==\"$1\") | $2" "$TMP/sa_out.ndjson"; }
 assert_eq "$S" "n1 null-temp filled"         "$(_sa n1 .average_temp)"  "10"
 assert_eq "$S" "n1 temp_source set"          "$(_sa n1 .temp_source)"   "archive"
 assert_eq "$S" "n1 wind_speed filled"        "$(_sa n1 .wind_speed)"    "7"
-assert_eq "$S" "n2 forecast upgraded"        "$(_sa n2 .temp_source)"   "archive"
-assert_eq "$S" "n2 temp upgraded to 19"      "$(_sa n2 .average_temp)"  "19"
-assert_eq "$S" "n3 extended fields added"    "$(_sa n3 .wind_speed)"    "8"
-assert_eq "$S" "n3 temp unchanged"           "$(_sa n3 .average_temp)"  "22"
-assert_eq "$S" "n4 already full unchanged"   "$(_sa n4 .wind_speed)"    "12"
+assert_eq "$S" "n2 Meteo overrides device temp" "$(_sa n2 .average_temp)" "19"
+assert_eq "$S" "n2 Meteo source recorded"       "$(_sa n2 .temp_source)" "archive"
+assert_eq "$S" "n3 device temp fallback"        "$(_sa n3 .average_temp)" "22"
+assert_eq "$S" "n3 device source recorded"      "$(_sa n3 .temp_source)" "device"
+assert_eq "$S" "n3 weather details enriched"    "$(_sa n3 .wind_speed)" "8"
+assert_eq "$S" "n5 weather without temp retained" "$(_sa n5 .weathercode)" "61"
+
+# Strava activity projection prefers cached Open-Meteo temperature, but falls
+# back to the device value when Meteo has none.
+S="strava-weather-source-precedence"
+printf '%s\n' \
+    '{"id":"meteo-first","average_temp":27}' \
+    '{"id":"device-fallback","average_temp":24}' \
+    > "$TMP/swp_store.ndjson"
+printf '{"meteo-first":{"v":2,"t":18,"s":"archive"},"device-fallback":{"v":2,"t":null,"s":"archive"}}' \
+    > "$TMP/swp_cache.json"
+jq -c --slurpfile wc "$TMP/swp_cache.json" '
+  ($wc[0][.id|tostring]) as $wc |
+  {
+    average_temp: ($wc.t // .average_temp),
+    temp_source: (if $wc.t != null then ($wc.s // "archive")
+                  elif .average_temp != null then "device" else null end)
+  }
+' "$TMP/swp_store.ndjson" > "$TMP/swp_out.ndjson"
+assert_eq "$S" "Meteo temp preferred over device" \
+    "$(jq -r 'select(.average_temp==18) | .average_temp' "$TMP/swp_out.ndjson")" "18"
+assert_eq "$S" "Meteo source label" \
+    "$(jq -r 'select(.average_temp==18) | .temp_source' "$TMP/swp_out.ndjson")" "archive"
+assert_eq "$S" "device temperature fallback" \
+    "$(jq -r 'select(.temp_source=="device") | .average_temp' "$TMP/swp_out.ndjson")" "24"
 
 # ── cron-guard-exit-code ─────────────────────────────────────────────────────
 # Mirrors the exit-code capture pattern in strava-cron-guard.sh:
@@ -3284,6 +3283,12 @@ assert_eq "$S" "no temperature → empty string" \
 printf '%s\n' "log with code 200" "15" > "$TMP/fw_out_multi.txt"
 assert_eq "$S" "log line with embedded number ignored" \
     "$(grep -E '^-?[0-9]+$' "$TMP/fw_out_multi.txt" 2>/dev/null | tail -1 || true)" "15"
+
+# Weather details remain usable when Open-Meteo has no mean temperature.
+_fw_parse_weather '{"daily":{"temperature_2m_mean":[null],"windspeed_10m_max":[9],"weathercode":[61],"precipitation_sum":[2.4]}}'
+assert_eq "$S" "missing Meteo temperature stays empty" "$_fw_t" ""
+assert_eq "$S" "wind parsed without temperature" "$_fw_wind_speed" "9"
+assert_eq "$S" "conditions parsed without temperature" "$_fw_weathercode" "61"
 
 # ── enrich-zero-fallback ──────────────────────────────────────────────────────
 # When a stored activity has average_speed/max_speed = 0 (e.g. from an HTML-only

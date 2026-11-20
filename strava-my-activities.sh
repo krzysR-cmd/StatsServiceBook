@@ -285,9 +285,6 @@ else
   log "store: +$ADDED new, ~$CHANGED updated, -$DELETED removed, $TOTAL_STORED total"
 fi
 
-run_weather_backfill "$STORE" "$WEATHER_CACHE" "$TMP" "$DETAIL_DIR" "$WEB_DIR"
-[ "${_rw_changed:-0}" -gt 0 ] && { log "weather: backfilled/upgraded ${_rw_changed} activities"; ADDED=$((ADDED + _rw_changed)); }
-
 # --- 3a. Reconcile detail files with the synced store ----------------------
 # Deleted activities: drop their cached detail JSON (it is web-served) and any
 # skip-list entry. Changed activities: invalidate the cached detail so section 3b
@@ -348,6 +345,8 @@ fi
 # shellcheck disable=SC1090
 . "$STRAVA_LIBDIR/strava-my-detail-backfill.sh"
 
+run_weather_backfill "$STORE" "$WEATHER_CACHE" "$TMP" "$DETAIL_DIR" "$WEB_DIR"
+[ "${_rw_changed:-0}" -gt 0 ] && { log "weather: backfilled/upgraded ${_rw_changed} activities"; ADDED=$((ADDED + _rw_changed)); }
 
 else
   log "import disabled (STRAVA_MY_IMPORT_ENABLED=0) — re-rendering from existing store"
@@ -979,8 +978,9 @@ jq -s --arg generatedAt "$GENERATED_AT" \
           weighted_average_watts: (.weighted_average_watts // $e.weighted_average_watts),
           max_watts:              (.max_watts // $e.max_watts),
           kilojoules:             (.kilojoules // $e.kilojoules),
-          average_temp:           (.average_temp // $e.average_temp // $wctemp),
-          temp_source:            (if ($wc | type) == "object" and ($wc.t != null) then $wc.s else null end),
+          average_temp:           ($wctemp // .average_temp // $e.average_temp),
+          temp_source:            (if $wctemp != null then (if ($wc | type) == "object" then ($wc.s // "archive") else "archive" end)
+                                   elif .average_temp != null or $e.average_temp != null then "device" else null end),
           apparent_temp:          (if ($wc | type) == "object" then $wc.at else null end),
           wind_speed:             (if ($wc | type) == "object" then $wc.ws else null end),
           wind_dir:               (if ($wc | type) == "object" then $wc.wd else null end),

@@ -94,11 +94,12 @@ gpx_hr_summary() {
   ' "$1"
 }
 
-# fetch_weather_temp lat lon date  →  prints integer °C or "" on error/unavailable
-# On success sets globals: _fw_temp_source ("archive"/"forecast"),
-# _fw_apparent_temp (feels-like °C integer), _fw_wind_speed (km/h integer),
-# _fw_wind_dir (dominant direction degrees), _fw_weathercode (WMO code),
-# _fw_precipitation (mm).
+# fetch_weather_temp lat lon date  →  prints integer °C when available
+# Sets globals: _fw_temp_source ("archive"/"forecast"),
+# _fw_t (mean temperature °C integer), _fw_apparent_temp (feels-like °C integer),
+# _fw_wind_speed (km/h integer), _fw_wind_dir (dominant direction degrees),
+# _fw_weathercode (WMO code), _fw_precipitation (mm).
+# Returns success when any weather field is available, even if temperature is not.
 # If caller sets _fw_archive_only=1, skips the forecast fallback — used by the
 # upgrade path so a still-missing archive value doesn't overwrite a forecast temp.
 # Tries Open-Meteo archive first (ERA5, data since 1940, ~5 day lag), then falls
@@ -108,12 +109,13 @@ _fw_parse_weather() {
   # Parse all daily weather fields from a cached Open-Meteo JSON response ($1).
   # Populates _fw_t and the five extra globals.
   _fw_t=$(printf '%s' "$1" | jq -r '.daily.temperature_2m_mean[0] // empty | round' 2>/dev/null || true)
-  [ -n "$_fw_t" ] || return 1
   _fw_apparent_temp=$(printf '%s' "$1" | jq -r '.daily.apparent_temperature_mean[0] // empty | round' 2>/dev/null || true)
   _fw_wind_speed=$(printf '%s' "$1" | jq -r '.daily.windspeed_10m_max[0] // empty | round' 2>/dev/null || true)
   _fw_wind_dir=$(printf '%s' "$1" | jq -r '.daily.winddirection_10m_dominant[0] // empty | round' 2>/dev/null || true)
   _fw_weathercode=$(printf '%s' "$1" | jq -r '.daily.weathercode[0] // empty' 2>/dev/null || true)
   _fw_precipitation=$(printf '%s' "$1" | jq -r '.daily.precipitation_sum[0] // empty' 2>/dev/null || true)
+  [ -n "$_fw_t" ] || [ -n "$_fw_apparent_temp" ] || [ -n "$_fw_wind_speed" ] || \
+    [ -n "$_fw_wind_dir" ] || [ -n "$_fw_weathercode" ] || [ -n "$_fw_precipitation" ]
 }
 _fw_vars="temperature_2m_mean,apparent_temperature_mean,windspeed_10m_max,winddirection_10m_dominant,weathercode,precipitation_sum"
 fetch_weather_temp() {
@@ -121,10 +123,18 @@ fetch_weather_temp() {
   _fw_temp_source="" _fw_t=""
   _fw_apparent_temp="" _fw_wind_speed="" _fw_wind_dir="" _fw_weathercode="" _fw_precipitation=""
   log "weather: fetching archive $3 ($1,$2)..."
+  _fw_archive_t="" _fw_archive_source="" _fw_archive_apparent="" _fw_archive_wind=""
+  _fw_archive_dir="" _fw_archive_code="" _fw_archive_precip=""
   if _fw_resp=$(curl_retry -fsS --max-time 15 \
     "https://archive-api.open-meteo.com/v1/archive?latitude=$1&longitude=$2&start_date=$3&end_date=$3&daily=${_fw_vars}&timezone=auto" \
       ); then
-    _fw_parse_weather "$_fw_resp" && _fw_temp_source="archive" || true
+    if _fw_parse_weather "$_fw_resp"; then
+      _fw_temp_source="archive"
+      _fw_archive_t=$_fw_t _fw_archive_source=$_fw_temp_source
+      _fw_archive_apparent=$_fw_apparent_temp _fw_archive_wind=$_fw_wind_speed
+      _fw_archive_dir=$_fw_wind_dir _fw_archive_code=$_fw_weathercode
+      _fw_archive_precip=$_fw_precipitation
+    fi
   else
     log "WARNING: weather archive curl failed for $3 ($1,$2)"
   fi
@@ -134,12 +144,22 @@ fetch_weather_temp() {
       "https://api.open-meteo.com/v1/forecast?latitude=$1&longitude=$2&start_date=$3&end_date=$3&daily=${_fw_vars}&timezone=auto" \
         ); then
       log "WARNING: weather forecast curl failed for $3 ($1,$2)"
-      return 1
+      _fw_t=$_fw_archive_t _fw_temp_source=$_fw_archive_source
+      _fw_apparent_temp=$_fw_archive_apparent _fw_wind_speed=$_fw_archive_wind
+      _fw_wind_dir=$_fw_archive_dir _fw_weathercode=$_fw_archive_code
+      _fw_precipitation=$_fw_archive_precip
+    elif _fw_parse_weather "$_fw_resp"; then
+      _fw_temp_source="forecast"
+    else
+      _fw_t=$_fw_archive_t _fw_temp_source=$_fw_archive_source
+      _fw_apparent_temp=$_fw_archive_apparent _fw_wind_speed=$_fw_archive_wind
+      _fw_wind_dir=$_fw_archive_dir _fw_weathercode=$_fw_archive_code
+      _fw_precipitation=$_fw_archive_precip
     fi
-    _fw_parse_weather "$_fw_resp" && _fw_temp_source="forecast" || true
   fi
-  [ -n "$_fw_t" ] || return 1
-  printf '%s\n' "$_fw_t"
+  [ -n "$_fw_temp_source" ] || return 1
+  [ -n "$_fw_t" ] && printf '%s\n' "$_fw_t"
+  return 0
 }
 
 # _rw_coords id gpx_file detail_dir web_dir  →  sets _wlat/_wlon
@@ -192,56 +212,51 @@ _rw_coords() {
 }
 
 # run_weather_backfill store cache tmp detail_dir web_dir
-# Fills/upgrades the weather cache for activities in the store.
-#   Pass 1 — null-temp, no object in cache → fetch all fields → {t,s,at,ws,wd,wc,pr}
-#   Pass 2 — has-temp (store OR detail file), no object in cache → fetch extended only → {at,ws,wd,wc,pr}
-#   Pass 3 — cached forecast entry >7 days old → archive-only re-fetch → upgrade
-# Legacy plain-number cache entries are treated as "no object" and are upgraded too.
+# Fetches complete Open-Meteo weather for every activity with coordinates.
+# Cache version 2 means all available fields were fetched; older cache entries
+# are refreshed, and "no-coord" entries are retried as details become available.
+# Pass 3 upgrades forecast temperatures to archive values after ~7 days.
 # Sets global _rw_changed to the total count of cache entries written this run.
 run_weather_backfill() {
   _rw_store="$1" _rw_cache="$2" _rw_tmp="$3" _rw_ddir="$4" _rw_wdir="$5"
   [ -f "$_rw_cache" ] || printf '{}' > "$_rw_cache"
   _rw_changed=0
 
-  # Pass 1: null-temp activities not yet cached as an object
-  jq -c 'select(.average_temp == null) | {id:(.id|tostring), date, gpx:(.gpx_file//"")}' \
+  # Pass 1: fetch every activity whose weather cache has not been fully populated.
+  jq -c 'select(.id != null) | {id:(.id|tostring), date, gpx:(.gpx_file//"")}' \
       "$_rw_store" > "$_rw_tmp/rw1.ndjson"
   _rw_p1_total=$(jq -s 'length' "$_rw_tmp/rw1.ndjson")
   _rw_p1_unc=$(jq -s --slurpfile c "$_rw_cache" \
-      '[.[] | select(.id as $i | ((($c[0][$i]|type) != "object") or ($c[0][$i].t == null) or ($c[0][$i].s == "")) and ($c[0][$i].s != "no-coord"))] | length' "$_rw_tmp/rw1.ndjson")
-  log "weather: Pass 1 — $_rw_p1_unc to fetch of $_rw_p1_total null-temp..."
-  # Loop only over uncached rows (looping all rows with ~4 jq each took minutes for ~500).
+      '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].v != 2))] | length' "$_rw_tmp/rw1.ndjson")
+  log "weather: Pass 1 — $_rw_p1_unc incomplete of $_rw_p1_total activities..."
   if [ "$_rw_p1_unc" -gt 0 ]; then
     jq -c --slurpfile c "$_rw_cache" \
-        'select(.id as $i | ((($c[0][$i]|type) != "object") or ($c[0][$i].t == null) or ($c[0][$i].s == "")) and ($c[0][$i].s != "no-coord"))' \
+        'select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].v != 2))' \
         "$_rw_tmp/rw1.ndjson" > "$_rw_tmp/rw1u.ndjson"
   else
     : > "$_rw_tmp/rw1u.ndjson"
   fi
-  _rw_p1_fetched=0 _rw_p1_nocoord=0 _rw_p1_fail=0 _rw_p1_tried=0
+  _rw_p1_fetched=0 _rw_p1_nocoord=0 _rw_p1_fail=0
   while [ "$_rw_p1_unc" -gt 0 ] && IFS= read -r _rwe; do
     _wid=$(printf '%s' "$_rwe"  | jq -r '.id')
     _wd=$(printf '%s' "$_rwe"   | jq -r '.date')
     _wgpx=$(printf '%s' "$_rwe" | jq -r '.gpx')
-    jq -e --arg i "$_wid" '(.[$i]|type)=="object" and ((.[$i].t != null and .[$i].s != "") or .[$i].s == "no-coord")' "$_rw_cache" >/dev/null 2>&1 && continue
-    _rw_p1_tried=$((_rw_p1_tried+1))
     _rw_coords "$_wid" "$_wgpx" "$_rw_ddir" "$_rw_wdir"
     if [ -z "$_wlat" ] || [ -z "$_wlon" ]; then
       _rw_p1_nocoord=$((_rw_p1_nocoord+1))
-      jq --arg id "$_wid" '.[$id]={"t":null,"s":"no-coord"}' "$_rw_cache" > "$_rw_cache.tmp" \
+      jq --arg id "$_wid" 'if .[$id] == null then .[$id]={"t":null,"s":"no-coord"} else . end' "$_rw_cache" > "$_rw_cache.tmp" \
         && jq -e . "$_rw_cache.tmp" >/dev/null 2>&1 \
         && mv "$_rw_cache.tmp" "$_rw_cache"
       continue
     fi
-    _fw_temp_source="" _fw_apparent_temp="" _fw_wind_speed="" _fw_wind_dir="" _fw_weathercode="" _fw_precipitation=""
-    fetch_weather_temp "$_wlat" "$_wlon" "$_wd" > "$_rw_tmp/fw_out.txt" 2>&1 || log "WARNING: weather fetch failed for activity $_wid ($3)"
-    _wt=$(grep -E '^-?[0-9]+$' "$_rw_tmp/fw_out.txt" 2>/dev/null | tail -1 || true)
-    if [ -z "$_wt" ]; then _rw_p1_fail=$((_rw_p1_fail+1)); continue; fi
-    jq --arg id "$_wid" --argjson t "$_wt" --arg s "$_fw_temp_source" \
+    _fw_temp_source="" _fw_t="" _fw_apparent_temp="" _fw_wind_speed="" _fw_wind_dir="" _fw_weathercode="" _fw_precipitation=""
+    fetch_weather_temp "$_wlat" "$_wlon" "$_wd" > "$_rw_tmp/fw_out.txt" 2>&1 || log "WARNING: weather fetch failed for activity $_wid ($_wd)"
+    if [ -z "$_fw_temp_source" ]; then _rw_p1_fail=$((_rw_p1_fail+1)); continue; fi
+    jq --arg id "$_wid" --argjson t "${_fw_t:-null}" --arg s "$_fw_temp_source" \
        --argjson at "${_fw_apparent_temp:-null}" --argjson ws "${_fw_wind_speed:-null}" \
        --argjson wd "${_fw_wind_dir:-null}"      --argjson wc "${_fw_weathercode:-null}" \
        --argjson pr "${_fw_precipitation:-null}" \
-       '.[$id]={t:$t,s:$s,at:$at,ws:$ws,wd:$wd,wc:$wc,pr:$pr}' "$_rw_cache" \
+       '.[$id]={v:2,t:$t,s:$s,at:$at,ws:$ws,wd:$wd,wc:$wc,pr:$pr}' "$_rw_cache" \
        > "$_rw_cache.tmp" \
        && jq -e . "$_rw_cache.tmp" >/dev/null 2>&1 \
        && mv "$_rw_cache.tmp" "$_rw_cache"
@@ -254,83 +269,7 @@ run_weather_backfill() {
   log "weather: Pass 1 done — +$_rw_p1_fetched fetched, $_rw_p1_nocoord no-coord, $_rw_p1_fail api-fail, $(jq 'length' "$_rw_cache") total cached"
   _rw_changed=$((_rw_changed + _rw_p1_fetched))
 
-  # Pass 2: has-temp activities (store OR detail file) missing extended cache fields.
-  # Strava's list endpoint omits average_temp; it only appears in the detail file.
-  # Scan detail files to find those device temps so Pass 2 triggers correctly.
-  if ls "$_rw_ddir"/*.json >/dev/null 2>&1; then
-    : > "$_rw_tmp/rw2_details.ndjson"
-    _rw_detail_count=0 _rw_detail_invalid=0
-    # Fast path: one jq over every detail file (per-file jq was ~30 s for ~500 files).
-    # Only if it fails (some file is invalid JSON) fall back to the per-file loop
-    # that finds and quarantines the bad file(s).
-    if ! jq -c 'select(.id != null and .average_temp != null) | {(.id|tostring): .average_temp}' \
-        "$_rw_ddir"/*.json > "$_rw_tmp/rw2_details.ndjson" 2>/dev/null; then
-      : > "$_rw_tmp/rw2_details.ndjson"
-      for _rw_detail_file in "$_rw_ddir"/*.json; do
-        [ -f "$_rw_detail_file" ] || continue
-        _rw_detail_count=$((_rw_detail_count + 1))
-        if jq -c 'select(.id != null and .average_temp != null) | {(.id|tostring): .average_temp}' \
-            "$_rw_detail_file" >> "$_rw_tmp/rw2_details.ndjson" 2>/dev/null; then
-          :
-        else
-          _rw_detail_invalid=$((_rw_detail_invalid + 1))
-          log "warning: weather skipped invalid detail JSON: $_rw_detail_file"
-          mv "$_rw_detail_file" "$_rw_detail_file.invalid"
-        fi
-        [ $((_rw_detail_count % 100)) -eq 0 ] && log "weather: Pass 2 checked $_rw_detail_count detail files"
-      done
-    fi
-    [ "$_rw_detail_invalid" -gt 0 ] && \
-      log "weather: Pass 2 quarantined $_rw_detail_invalid invalid detail JSON file(s)"
-    jq -s 'add // {}' \
-        "$_rw_tmp/rw2_details.ndjson" > "$_rw_tmp/rw2_devtemp.json"
-  else
-    printf '{}' > "$_rw_tmp/rw2_devtemp.json"
-  fi
-  jq -c --slurpfile dt "$_rw_tmp/rw2_devtemp.json" \
-      'select(.average_temp != null or ($dt[0][(.id|tostring)] != null)) | {id:(.id|tostring), date, gpx:(.gpx_file//"")}' \
-      "$_rw_store" > "$_rw_tmp/rw2.ndjson"
-  _rw_p2_total=$(jq -s 'length' "$_rw_tmp/rw2.ndjson")
-  _rw_p2_unc=$(jq -s --slurpfile c "$_rw_cache" \
-      '[.[] | select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].ws == null))] | length' "$_rw_tmp/rw2.ndjson")
-  log "weather: Pass 2 — $_rw_p2_unc to enrich of $_rw_p2_total has-temp..."
-  if [ "$_rw_p2_unc" -gt 0 ]; then
-    jq -c --slurpfile c "$_rw_cache" \
-        'select(.id as $i | (($c[0][$i]|type) != "object") or ($c[0][$i].ws == null))' \
-        "$_rw_tmp/rw2.ndjson" > "$_rw_tmp/rw2u.ndjson"
-  else
-    : > "$_rw_tmp/rw2u.ndjson"
-  fi
-  _rw_p2_fetched=0
-  while [ "$_rw_p2_unc" -gt 0 ] && IFS= read -r _rwe; do
-    _wid=$(printf '%s' "$_rwe"  | jq -r '.id')
-    _wd=$(printf '%s' "$_rwe"   | jq -r '.date')
-    _wgpx=$(printf '%s' "$_rwe" | jq -r '.gpx')
-    jq -e --arg i "$_wid" '(.[$i]|type)=="object" and (.[$i].ws != null)' "$_rw_cache" >/dev/null 2>&1 && continue
-    _rw_coords "$_wid" "$_wgpx" "$_rw_ddir" "$_rw_wdir"
-    if [ -z "$_wlat" ] || [ -z "$_wlon" ]; then continue; fi
-    _fw_temp_source="" _fw_apparent_temp="" _fw_wind_speed="" _fw_wind_dir="" _fw_weathercode="" _fw_precipitation=""
-    fetch_weather_temp "$_wlat" "$_wlon" "$_wd" >/dev/null 2>&1 || log "WARNING: weather fetch failed for activity $_wid ($3)"
-    [ -n "$_fw_wind_speed" ] || continue
-    jq --arg id "$_wid" \
-       --argjson at "${_fw_apparent_temp:-null}" --argjson ws "${_fw_wind_speed:-null}" \
-       --argjson wd "${_fw_wind_dir:-null}"      --argjson wc "${_fw_weathercode:-null}" \
-       --argjson pr "${_fw_precipitation:-null}" \
-       '.[$id]={at:$at,ws:$ws,wd:$wd,wc:$wc,pr:$pr}' "$_rw_cache" \
-       > "$_rw_cache.tmp" \
-       && jq -e . "$_rw_cache.tmp" >/dev/null 2>&1 \
-       && mv "$_rw_cache.tmp" "$_rw_cache"
-    _rw_p2_fetched=$((_rw_p2_fetched+1))
-    if [ $((_rw_p2_fetched % 25)) -eq 0 ]; then
-      log "weather: Pass 2 — $_rw_p2_fetched/$_rw_p2_unc enriched..."
-    fi
-  done < "$_rw_tmp/rw2u.ndjson"
-  if [ "$_rw_p2_fetched" -gt 0 ]; then
-    log "weather: Pass 2 done — enriched $_rw_p2_fetched activities with extended fields"
-    _rw_changed=$((_rw_changed + _rw_p2_fetched))
-  fi
-
-  # Pass 3: upgrade forecast cache entries to archive once data is available (~7 days after activity)
+  # Pass 3: upgrade forecast temperatures to archive once data is available (~7 days after activity).
   jq -c --slurpfile c "$_rw_cache" \
     '(.id|tostring) as $id |
      select(($c[0][$id].s) == "forecast" and
@@ -356,7 +295,7 @@ run_weather_backfill() {
        --argjson at "${_fw_apparent_temp:-null}" --argjson ws "${_fw_wind_speed:-null}" \
        --argjson wd "${_fw_wind_dir:-null}"      --argjson wc "${_fw_weathercode:-null}" \
        --argjson pr "${_fw_precipitation:-null}" \
-       '.[$id]={t:$t,s:$s,at:$at,ws:$ws,wd:$wd,wc:$wc,pr:$pr}' "$_rw_cache" \
+       '.[$id]={v:2,t:$t,s:$s,at:$at,ws:$ws,wd:$wd,wc:$wc,pr:$pr}' "$_rw_cache" \
        > "$_rw_cache.tmp" \
        && jq -e . "$_rw_cache.tmp" >/dev/null 2>&1 \
        && mv "$_rw_cache.tmp" "$_rw_cache"
