@@ -292,7 +292,7 @@ jobs:
 
   deploy-report:
     needs: functional-tests
-    if: if: always() && github.event_name != 'pull_request' && github.actor != 'dependabot[bot]'
+    if: always() && github.event_name != 'pull_request' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
