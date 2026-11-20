@@ -350,7 +350,7 @@ jobs:
 
       - name: Add format-extensible test statistics
         if: always() && hashFiles('downloaded-results/*.json', 'downloaded-results/*.xml', 'downloaded-shell-report/*.xml') != ''
-        uses: raczeja/test-stats-gh-pages-action@13971a4e9dafa7c55ef63af31433f67883856ecd # v1.1.8
+        uses: raczeja/test-stats-gh-pages-action@a32b79ab1dfafaf4a0146037c969758c1d9ca85d # v1.1.9
         with:
           result-files: |
             downloaded-results/*.json
