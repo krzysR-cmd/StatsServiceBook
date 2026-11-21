@@ -917,7 +917,7 @@ function render(){
   }
   document.getElementById("dowSubtitle").innerHTML = "— selected sport · " + (isAll ? "all years" : selYear);
   document.getElementById("sportSubtitle").innerHTML = "— " + (isAll ? "all time"+(_period?" · "+_period:"") : selYear);
-  document.getElementById("recsSubtitle").innerHTML = "— all time · " + (selSport && selSport!=="All" ? esc(selSport) : "all sports");
+  document.getElementById("recsSubtitle").innerHTML = "— " + (isAll ? "all time" : esc(selYear)) + " · " + (selSport && selSport!=="All" ? esc(selSport) : "all sports");
   var f = filtered();
   var fyAll  = isAll ? f : filterYear(f, selYear);  // records, DOW, year table
   var fyYear = filterYear(f, yrStr);                // monthly breakdown
@@ -1157,7 +1157,7 @@ function render(){
       '<div class="empty">Need at least 2 years of data for comparison.</div>';
   }
 
-  // --- Personal records (all time, selected sport) ---
+  // --- Personal records (selected year and sport) ---
   var rec = computeRecords(fyAll);
   var ri  = [];
   function mkRec(l,v,s,lnk){

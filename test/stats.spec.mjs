@@ -831,6 +831,27 @@ test.describe("stats-records", () => {
       `"Most steps" should be absent for Ride sport, got: ${JSON.stringify(labels)}`,
     ).toBeTruthy();
   });
+
+  test("records-follow-year-and-sport-filters", async () => {
+    await page.selectOption("#yearSel", "2025");
+    await page.waitForTimeout(300);
+
+    const yearRecord = await getRecVal(page, "Longest distance");
+    const yearDetails = await page.$eval("#recs .rec .rs", (el) => el.textContent);
+    const yearSubtitle = await page.$eval("#recsSubtitle", (el) => el.textContent);
+    expect(yearRecord).toContain("84.1");
+    expect(yearDetails).toContain("2025-10-22");
+    expect(yearSubtitle).toContain("2025 · Ride");
+
+    await page.selectOption("#yearSel", "all");
+    await page.selectOption("#sportSel", "Run");
+    await page.waitForTimeout(300);
+
+    const runRecord = await getRecVal(page, "Longest distance");
+    const runSubtitle = await page.$eval("#recsSubtitle", (el) => el.textContent);
+    expect(runRecord).toContain("8.2");
+    expect(runSubtitle).toContain("all time · Run");
+  });
 });
 
 // ── Stats Goals ────────────────────────────────────────────────────────────────

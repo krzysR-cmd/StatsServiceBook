@@ -74,7 +74,7 @@ card for synch is also not updated when Sync C| **Data completeness** | `/strava
 
 - KPI cards, year overview table, monthly breakdown chart, year-over-year km/month heatmap
 - **Annual Goals** — set a yearly Ride distance target; progress and year-end projection with monthly and weekly targets distributed by the previous year's activity pattern (equal split when no history is available)
-- **Personal records** — longest ride, most climbing, fastest avg speed, max speed, best VAM, most power, most energy (kJ), most steps (Walk/Hike), best week, best month by km and by count, longest streak — all-time across all sports; each record links to the activity
+- **Personal records** — longest ride, most climbing, fastest avg speed, max speed, best VAM, most power, most energy (kJ), most steps (Walk/Hike), best week, best month by km and by count, longest streak — follows the selected year and sport filters; each record links to the activity
 - **Top 10 leaderboard** — ranked table of your top 10 activities for a chosen metric (Distance, Moving time, Elevation, Avg speed, Max speed, Power, Work, VAM, Longest climb, Steps); dropdown to switch metric; default is Longest climb; respects sport + year filters; each row links to the activity detail page
 - **Month ‹/› navigation** — when a past year is selected, prev/next buttons let you browse month by month without opening the dropdown
 
