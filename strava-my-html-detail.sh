@@ -104,11 +104,11 @@ cat > "$WEB_DIR/activity.html" <<'HTML'
   .climb-prof-legend span{display:inline-flex;align-items:center;gap:.3rem}
   .climb-prof-legend i{width:.85rem;height:.85rem;border-radius:2px;display:inline-block;flex-shrink:0}
   /* Climbing analysis + gradient distribution sit side-by-side on desktop, stack on mobile. */
-  .climb-grade-row{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:flex-start}
-  .climb-grade-row>.box{margin:.5rem 0 1rem}
+  .climb-grade-row{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:stretch}
+  .climb-grade-row>.box{box-sizing:border-box;margin:.5rem 0 1rem}
   .climb-grade-row #climb-profile-box{flex:4 1 420px;min-width:0}
-  .climb-grade-row #grade-dist-box{flex:1 1 200px;min-width:0}
-  .climb-grade-row #road-dist-box{flex:1 1 200px;min-width:0}
+  .climb-grade-row #grade-dist-box{flex:1 1 200px;min-width:200px}
+  .climb-grade-row #road-dist-box{flex:1 1 200px;min-width:200px}
   /* Cap the donut+legend cluster so it stays compact: side-by-side when the box is
      wide (gradient section shown alone), legend wrapping below the donut when the box
      is narrow (shown next to the climbing-analysis chart). */

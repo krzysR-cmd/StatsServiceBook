@@ -382,6 +382,28 @@ test.describe("activity-detail", () => {
     ).toBeTruthy();
   });
 
+  test("distribution-boxes-have-equal-size", async () => {
+    const size = await page.evaluate(() => {
+      const grade = document.getElementById("grade-dist-box");
+      const road = document.getElementById("road-dist-box");
+      if (!grade || !road ||
+          grade.style.display === "none" ||
+          road.style.display === "none") {
+        return null;
+      }
+      const g = grade.getBoundingClientRect();
+      const r = road.getBoundingClientRect();
+      return {
+        widthDelta: Math.abs(g.width - r.width),
+        heightDelta: Math.abs(g.height - r.height),
+      };
+    });
+    if (size) {
+      expect(size.widthDelta).toBeLessThanOrEqual(2);
+      expect(size.heightDelta).toBeLessThanOrEqual(2);
+    }
+  });
+
   test("hr-maxavg-renders-from-samples", async () => {
     // Strava splits carry no per-sample HR series, so drive the max-average-HR
     // curve directly with a synthetic descending series and assert it renders.
