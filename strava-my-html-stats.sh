@@ -194,7 +194,7 @@ svg.bar{width:100%;display:block}
 </div>
 
 <div class="sec" data-sid="road-types" id="road-types-section" style="display:none">
-<h2>Road type distribution <span class="muted" style="font-size:.78rem;font-weight:400;text-transform:none">&mdash; estimated from GPX/TCX</span></h2>
+<h2>Road type distribution <span class="muted" style="font-size:.78rem;font-weight:400;text-transform:none">&mdash; matched from OSM tags, GPX/TCX metadata, or fallback estimates</span></h2>
 <div class="chart-box"><div class="road-dist-wrap"><svg id="statsRoadSvg" viewBox="0 0 150 150"></svg><div class="road-dist-legend" id="statsRoadLegend"></div></div></div>
 </div>
 

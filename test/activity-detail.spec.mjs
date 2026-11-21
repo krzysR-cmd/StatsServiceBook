@@ -66,13 +66,21 @@ test.describe("activity-detail", () => {
       paved: normalizeRoadValue("surface=asphalt"),
       gravel: normalizeRoadValue("compacted"),
       trail: normalizeRoadValue("footway"),
+      residential: normalizeRoadValue("residential"),
       unknown: normalizeRoadValue(""),
+      pavedHeuristic: classifyTrackSegments([
+        {lat:50,lon:19,cum:0,ele:100,time:0,el:null},
+        {lat:50.0045,lon:19,cum:500,ele:100,time:60,el:null},
+        {lat:50.009,lon:19,cum:1000,ele:100,time:120,el:null}
+      ], "Ride")[0].type
     }));
     expect(result).toEqual({
       paved: "paved",
       gravel: "gravel",
       trail: "trail",
+      residential: "paved",
       unknown: "",
+      pavedHeuristic: "paved"
     });
   });
 
