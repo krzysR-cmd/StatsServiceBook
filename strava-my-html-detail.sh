@@ -507,7 +507,8 @@ function fillDetailFromActivity(d, act){
   var fields = [
     "suffer_score", "average_heartrate", "max_heartrate",
     "average_temp", "temp_source", "apparent_temp", "wind_speed",
-    "wind_dir", "weathercode", "precipitation", "max_single_climb"
+    "wind_dir", "weathercode", "precipitation", "max_single_climb",
+    "road_segments"
   ];
   fields.forEach(function(key){
     if (d[key] == null && act[key] != null) d[key] = act[key];
@@ -1621,7 +1622,7 @@ function fetchGpxText(url){
 
 // Fetch + parse ourselves to avoid leaflet-gpx's responseXML=null crash when
 // uhttpd serves .gpx without an XML Content-Type header.
-function renderGpxMap(gpxUrl, sport, maxSingleClimb){
+function renderGpxMap(gpxUrl, sport, maxSingleClimb, roadSegmentsOverride){
   var box = document.getElementById("map-box");
   if (typeof L === "undefined") {
     hideMapSpin();
@@ -1648,7 +1649,9 @@ function renderGpxMap(gpxUrl, sport, maxSingleClimb){
         leafletLine = line;
         map.fitBounds(line.getBounds());
         addDirectionArrows(map, pts);
-        var roadSegments = classifyTrackSegments(trackPts, sport);
+        var roadSegments = (roadSegmentsOverride && roadSegmentsOverride.length)
+          ? roadSegmentsOverride
+          : classifyTrackSegments(trackPts, sport);
         renderRoadDist(roadSegments);
         if (roadSegments.length) {
           _roadTypeLayers = L.layerGroup();
@@ -1661,7 +1664,8 @@ function renderGpxMap(gpxUrl, sport, maxSingleClimb){
                 weight: 7,
                 opacity: 0.85
               }).bindTooltip((rs.type.charAt(0).toUpperCase()+rs.type.slice(1))
-                + " · " + (rs.confidence === "high" ? "track metadata" : "estimated"))
+                + " · " + (rs.confidence === "OpenStreetMap" ? "OpenStreetMap" :
+                  rs.confidence === "track metadata" ? "track metadata" : "estimated fallback"))
                 .addTo(_roadTypeLayers);
             }
           }
@@ -1675,7 +1679,7 @@ function renderGpxMap(gpxUrl, sport, maxSingleClimb){
             btn.style.cssText = "background:transparent;border:0;color:inherit;font:inherit;cursor:pointer;padding:.15rem .25rem";
             var legend = L.DomUtil.create("div", "", div);
             legend.style.display = "none";
-            legend.innerHTML = '<div><b>Estimated road type</b></div>'
+            legend.innerHTML = '<div><b>Road type classification</b></div>'
               + '<div><span style="color:'+ROAD_COLORS.paved+'">■</span> Paved</div>'
               + '<div><span style="color:'+ROAD_COLORS.gravel+'">■</span> Gravel</div>'
               + '<div><span style="color:'+ROAD_COLORS.unpaved+'">■</span> Unpaved</div>'
@@ -1817,6 +1821,7 @@ function normalizeRoadValue(value){
   if (/^(2|3|gravel|compacted|fine_gravel)$/.test(v)) return "gravel";
   if (/^(4|5|dirt|ground|earth|sand|grass|mud|unpaved)$/.test(v)) return "unpaved";
   if (/(asphalt|paved|concrete|sett|paving|tar|road)/.test(v)) return "paved";
+  if (/^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|service|living_street)$/.test(v)) return "paved";
   if (/(gravel|compacted|fine_gravel|pebble)/.test(v)) return "gravel";
   if (/(dirt|ground|earth|sand|grass|mud|unpaved)/.test(v)) return "unpaved";
   if (/(trail|path|footway|track|cycleway|singletrack|mtb)/.test(v)) return "trail";
@@ -1920,8 +1925,8 @@ function classifyTrackSegments(points, sport){
     var confidence = metaType ? "high" : "estimate";
     if (!type) {
       if (ride) {
-        if (speed >= 12) type = "paved";
-        else if (speed >= 6) type = "gravel";
+        if (speed >= 6) type = "paved";
+        else if (speed >= 3.5) type = "gravel";
         else type = "trail";
       } else if (foot) {
         if (grade > 8 || speed < 1.2) type = "trail";
@@ -2272,7 +2277,7 @@ function renderGpxCharts(gpxUrl, maxHR, movingTime, sport, maxSingleClimb, detai
 function renderMap(d){
   // GPX path: healthsync activities — the GPX file is cached locally on the router.
   var trackFile = d.gpx_file || d.tcx_file;
-  if (trackFile) { renderGpxMap(trackFile, d.sport_type || d.type || "", d.max_single_climb || 0); return; }
+  if (trackFile) { renderGpxMap(trackFile, d.sport_type || d.type || "", d.max_single_climb || 0, d.road_segments || null); return; }
   var box = document.getElementById("map-box");
   var enc = d.map && (d.map.polyline || d.map.summary_polyline);
   if (!enc || typeof L === "undefined") {
