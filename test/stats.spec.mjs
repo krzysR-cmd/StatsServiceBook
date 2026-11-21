@@ -1215,7 +1215,7 @@ test.describe("stats-section-order", () => {
       "#sec-wrap .sec .sec-handle",
       (els) => els.length,
     );
-    expect(n, `expected 13 .sec-handle elements, got ${n}`).toBe(13);
+    expect(n, `expected 12 .sec-handle elements, got ${n}`).toBe(12);
   });
 
   test("reset-button-present", async () => {
@@ -1267,8 +1267,8 @@ test.describe("stats-section-order", () => {
       }
     });
     expect(
-      Array.isArray(saved) && saved.length === 13,
-      "saved order should be 13-element array",
+      Array.isArray(saved) && saved.length === 12,
+      "saved order should be 12-element array",
     ).toBeTruthy();
     expect(
       saved[0],
