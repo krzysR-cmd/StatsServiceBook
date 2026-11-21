@@ -787,6 +787,12 @@ if ls "$DETAIL_DIR"/*.json >/dev/null 2>&1; then
   jq -c 'to_entries[] | {(.key): .value}' "$_road_cache" >> "$TMP/road-parts.ndjson" 2>/dev/null || :
   _road_computed=0
   _road_batch=50
+  _road_total="$(wc -l < "$TMP/road-gpx-paths.txt" | tr -d ' ')"
+  _road_cached="$(wc -l < "$TMP/road-cached-ids.txt" | tr -d ' ')"
+  _road_todo=$((_road_total - _road_cached))
+  [ "$_road_todo" -lt 0 ] && _road_todo=0
+  [ "$_road_todo" -gt 0 ] \
+    && log "render: computing road-type estimates for $_road_todo GPX activities (cached: $_road_cached)"
   _tab="$(printf '\t')"
   while IFS="$_tab" read -r _road_id _road_gpx; do
     [ -n "$_road_id" ] || continue
@@ -830,6 +836,9 @@ if ls "$DETAIL_DIR"/*.json >/dev/null 2>&1; then
     printf '{"%s":%s}\n' "$_road_id" "$_road_json" >> "$TMP/road-parts.ndjson"
     printf '%s\n' "$_road_id" >> "$TMP/road-cached-ids.txt"
     _road_computed=$((_road_computed+1))
+    if [ $((_road_computed % 10)) -eq 0 ]; then
+      log "render: road-type estimates $_road_computed/$_road_todo done"
+    fi
   done < "$TMP/road-gpx-paths.txt"
   jq -s 'add // {}' "$TMP/road-parts.ndjson" > "$TMP/road-types.json" 2>/dev/null || printf '{}' > "$TMP/road-types.json"
   cp "$TMP/road-types.json" "$_road_cache"
