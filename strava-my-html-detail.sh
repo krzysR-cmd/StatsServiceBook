@@ -108,7 +108,6 @@ cat > "$WEB_DIR/activity.html" <<'HTML'
   .climb-grade-row>.box{box-sizing:border-box;margin:.5rem 0 1rem}
   .climb-grade-row #climb-profile-box{flex:4 1 420px;min-width:0}
   .climb-grade-row #grade-dist-box{flex:1 1 200px;min-width:200px}
-  .climb-grade-row #road-dist-box{flex:1 1 200px;min-width:200px}
   /* Cap the donut+legend cluster so it stays compact: side-by-side when the box is
      wide (gradient section shown alone), legend wrapping below the donut when the box
      is narrow (shown next to the climbing-analysis chart). */
@@ -186,13 +185,6 @@ cat > "$WEB_DIR/activity.html" <<'HTML'
         <div class="grade-dist-legend" id="grade-dist-legend"></div>
       </div>
     </div>
-     <div class="box" id="road-dist-box" style="display:none">
-       <h3>Road type distribution</h3>
-       <div class="grade-dist-wrap">
-         <svg id="svg-roaddist" viewBox="0 0 150 150" preserveAspectRatio="xMidYMid meet"></svg>
-         <div class="grade-dist-legend" id="road-dist-legend"></div>
-       </div>
-     </div>
   </div>
   <div class="sec box" data-sid="hr" id="hr-box" style="display:none">
     <h3>Heart rate</h3>
@@ -507,8 +499,7 @@ function fillDetailFromActivity(d, act){
   var fields = [
     "suffer_score", "average_heartrate", "max_heartrate",
     "average_temp", "temp_source", "apparent_temp", "wind_speed",
-    "wind_dir", "weathercode", "precipitation", "max_single_climb",
-    "road_segments"
+    "wind_dir", "weathercode", "precipitation", "max_single_climb"
   ];
   fields.forEach(function(key){
     if (d[key] == null && act[key] != null) d[key] = act[key];
@@ -1649,55 +1640,6 @@ function renderGpxMap(gpxUrl, sport, maxSingleClimb, roadSegmentsOverride){
         leafletLine = line;
         map.fitBounds(line.getBounds());
         addDirectionArrows(map, pts);
-        var roadSegments = (roadSegmentsOverride && roadSegmentsOverride.length)
-          ? roadSegmentsOverride
-          : classifyTrackSegments(trackPts, sport);
-        renderRoadDist(roadSegments);
-        if (roadSegments.length) {
-          _roadTypeLayers = L.layerGroup();
-          for (var ri = 0; ri < roadSegments.length; ri++) {
-            var rs = roadSegments[ri];
-            var roadPts = pts.slice(rs.start, rs.end + 1);
-            if (roadPts.length >= 2) {
-              L.polyline(roadPts, {
-                color: ROAD_COLORS[rs.type] || ROAD_COLORS.unknown,
-                weight: 7,
-                opacity: 0.85
-              }).bindTooltip((rs.type.charAt(0).toUpperCase()+rs.type.slice(1))
-                + " · " + (rs.confidence === "OpenStreetMap" ? "OpenStreetMap" :
-                  rs.confidence === "track metadata" ? "track metadata" : "estimated fallback"))
-                .addTo(_roadTypeLayers);
-            }
-          }
-          var roadControl = L.control({position:"bottomright"});
-          roadControl.onAdd = function(){
-            var div = L.DomUtil.create("div", "road-type-control");
-            div.style.cssText = "background:var(--btn-bg,rgba(255,255,255,.9));border:1px solid var(--border-2,#ccc);border-radius:.3rem;padding:.25rem .35rem;font-size:.72rem;box-shadow:0 1px 3px rgba(0,0,0,.15)";
-            var btn = L.DomUtil.create("button", "", div);
-            btn.type = "button";
-            btn.innerHTML = "Show road types";
-            btn.style.cssText = "background:transparent;border:0;color:inherit;font:inherit;cursor:pointer;padding:.15rem .25rem";
-            var legend = L.DomUtil.create("div", "", div);
-            legend.style.display = "none";
-            legend.innerHTML = '<div><b>Road type classification</b></div>'
-              + '<div><span style="color:'+ROAD_COLORS.paved+'">■</span> Paved</div>'
-              + '<div><span style="color:'+ROAD_COLORS.gravel+'">■</span> Gravel</div>'
-              + '<div><span style="color:'+ROAD_COLORS.unpaved+'">■</span> Unpaved</div>'
-              + '<div><span style="color:'+ROAD_COLORS.trail+'">■</span> Trail</div>'
-              + '<div><span style="color:'+ROAD_COLORS.unknown+'">■</span> Unknown</div>';
-            var shown = false;
-            L.DomEvent.on(btn, "click", function(e){
-              L.DomEvent.stop(e);
-              shown = !shown;
-              if (shown) _roadTypeLayers.addTo(map); else map.removeLayer(_roadTypeLayers);
-              btn.innerHTML = shown ? "Hide road types" : "Show road types";
-              legend.style.display = shown ? "block" : "none";
-            });
-            L.DomEvent.disableClickPropagation(div);
-            return div;
-          };
-          roadControl.addTo(map);
-        }
         // Draw every qualifying climb (blue). The biggest gets a heavier line and
         // drives the initial zoom; when more than one is found the climb markers are
         // numbered ("Climb 2 …") to match the card's ‹ › switcher. Line layers are
@@ -1790,16 +1732,6 @@ function haversineM(lat1, lon1, lat2, lon2) {
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-var ROAD_COLORS = {
-  paved: "#ef6c00",
-  gravel: "#8d6e63",
-  unpaved: "#795548",
-  trail: "#388e3c",
-  unknown: "#9e9e9e"
-};
-var _roadTypeMap = null;
-var _roadTypeLayers = null;
-
 function textForElement(el, names){
   if (!el) return "";
   var wanted = {}, i, j;
@@ -1886,130 +1818,6 @@ function parseTrackPoints(doc, trackUrl){
     prev = p;
   }
   return points;
-}
-
-function classifyTrackSegments(points, sport){
-  if (!points || points.length < 2) return [];
-  var ride = isBike(sport || "");
-  var foot = isFoot(sport || "");
-  var segments = [];
-  var start = 0;
-  var startCum = points[0].cum || 0;
-  var window = 500;
-  var i;
-
-  function classifyWindow(a, b){
-    var metaCounts = {}, metaType = "", metaN = 0;
-    var distance = 0, elapsed = 0, grade = 0;
-    var firstEle = null, lastEle = null;
-    for (i = a; i <= b; i++) {
-      var meta = classifyTrackPoint(points[i].el, sport);
-      if (meta) {
-        metaCounts[meta] = (metaCounts[meta] || 0) + 1;
-        if (metaCounts[meta] > metaN) { metaN = metaCounts[meta]; metaType = meta; }
-      }
-      if (i > a) {
-        distance += haversineM(points[i-1].lat, points[i-1].lon, points[i].lat, points[i].lon);
-        if (points[i-1].time != null && points[i].time != null)
-          elapsed += Math.max(0, points[i].time-points[i-1].time);
-      }
-      if (points[i].ele != null) {
-        if (firstEle == null) firstEle = points[i].ele;
-        lastEle = points[i].ele;
-      }
-    }
-    if (distance > 0 && firstEle != null && lastEle != null)
-      grade = (lastEle-firstEle)/distance*100;
-    var speed = elapsed > 0 ? distance/elapsed : 0;
-    var type = metaType;
-    var confidence = metaType ? "high" : "estimate";
-    if (!type) {
-      if (ride) {
-        if (speed >= 6) type = "paved";
-        else if (speed >= 3.5) type = "gravel";
-        else type = "trail";
-      } else if (foot) {
-        if (grade > 8 || speed < 1.2) type = "trail";
-        else type = "paved";
-      } else {
-        type = "unknown";
-      }
-    }
-    if (ride && grade > 20) { type = "trail"; confidence = "estimate"; }
-    if (!type) type = "unknown";
-    return {type:type, distance:distance, confidence:confidence};
-  }
-
-  for (i = 1; i < points.length; i++) {
-    var endCum = points[i].cum != null ? points[i].cum : 0;
-    var reached = (endCum-startCum >= window);
-    if (reached || i === points.length-1) {
-      var seg = classifyWindow(start, i);
-      if (seg.distance >= 20) seg.start = start, seg.end = i, segments.push(seg);
-      start = i;
-      startCum = endCum;
-    }
-  }
-
-  var merged = [];
-  for (i = 0; i < segments.length; i++) {
-    var seg = segments[i];
-    if (merged.length && merged[merged.length-1].type === seg.type) {
-      merged[merged.length-1].end = seg.end;
-      merged[merged.length-1].distance += seg.distance;
-    } else {
-      merged.push(seg);
-    }
-  }
-  return merged;
-}
-
-function summarizeRoadSegments(segments){
-  var totals = {paved:0, gravel:0, unpaved:0, trail:0, unknown:0};
-  for (var i = 0; i < segments.length; i++) {
-    var s = segments[i];
-    if (totals[s.type] != null) totals[s.type] += s.distance || 0;
-  }
-  return totals;
-}
-
-function renderRoadDist(segments){
-  var box = document.getElementById("road-dist-box");
-  var svg = document.getElementById("svg-roaddist");
-  var leg = document.getElementById("road-dist-legend");
-  if (!box || !svg || !leg || !segments.length) return;
-  var totals = summarizeRoadSegments(segments);
-  var total = 0, i;
-  for (i in totals) if (totals.hasOwnProperty(i)) total += totals[i];
-  if (!(total > 0)) return;
-  var labels = [
-    ["paved","Paved"], ["gravel","Gravel"], ["unpaved","Unpaved"], ["trail","Trail"], ["unknown","Unknown"]
-  ];
-  var cx = 75, cy = 75, r = 52, sw = 22, C = 2*Math.PI*r, off = 0, parts = "";
-  for (i = 0; i < labels.length; i++) {
-    var key = labels[i][0], label = labels[i][1], meters = totals[key] || 0;
-    var frac = meters/total;
-    if (frac <= 0) continue;
-    var dash = frac*C, gap = C-dash;
-    parts += '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+ROAD_COLORS[key]
-      +'" stroke-width="'+sw+'" stroke-dasharray="'+dash.toFixed(2)+' '+gap.toFixed(2)
-      +'" stroke-dashoffset="'+(-off*C).toFixed(2)+'" transform="rotate(-90 '+cx+' '+cy+')">'
-      +'<title>'+label+': '+(meters/1000).toFixed(1)+' km</title></circle>';
-    off += frac;
-  }
-  parts += '<text x="'+cx+'" y="'+(cy-2)+'" text-anchor="middle" font-size="17" font-weight="600" fill="currentColor">'+(total/1000).toFixed(1)+'</text>';
-  parts += '<text x="'+cx+'" y="'+(cy+13)+'" text-anchor="middle" font-size="9" fill="var(--text-4)">km total</text>';
-  svg.innerHTML = parts;
-  var lh = "";
-  for (i = 0; i < labels.length; i++) {
-    var lm = totals[labels[i][0]] || 0;
-    if (lm <= 0) continue;
-    lh += '<div class="gd-row"><i style="background:'+ROAD_COLORS[labels[i][0]]+'"></i>'
-      + '<span class="gd-lbl">'+labels[i][1]+'</span>'
-      + '<span class="gd-val">'+(lm/1000).toFixed(1)+' km</span></div>';
-  }
-  leg.innerHTML = lh;
-  box.style.display = "";
 }
 
 // --- GPX elevation + heart rate + cadence charts (healthsync / scrape activities) -----
@@ -2277,7 +2085,7 @@ function renderGpxCharts(gpxUrl, maxHR, movingTime, sport, maxSingleClimb, detai
 function renderMap(d){
   // GPX path: healthsync activities — the GPX file is cached locally on the router.
   var trackFile = d.gpx_file || d.tcx_file;
-  if (trackFile) { renderGpxMap(trackFile, d.sport_type || d.type || "", d.max_single_climb || 0, d.road_segments || null); return; }
+  if (trackFile) { renderGpxMap(trackFile, d.sport_type || d.type || "", d.max_single_climb || 0, null); return; }
   var box = document.getElementById("map-box");
   var enc = d.map && (d.map.polyline || d.map.summary_polyline);
   if (!enc || typeof L === "undefined") {

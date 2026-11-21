@@ -56,12 +56,6 @@ STRAVA_TOKEN_REFRESH_MARGIN="600"
 # the next cron run. Set higher if your router has plenty of RAM/CPU.
 #STRAVA_CLIMB_BATCH="50"
 
-# OpenStreetMap road-surface matching (Overpass API). Route segments are matched
-# to OSM way tags first; speed/elevation heuristics are used only as fallback.
-#STRAVA_MY_ROAD_OSM_ENDPOINT="https://overpass-api.de/api/interpreter"
-#STRAVA_MY_ROAD_OSM_TIMEOUT="25"
-#STRAVA_MY_ROAD_MATCH_DISTANCE="35"
-
 # How many pages of your activity feed to pull.
 # api mode:    200 activities/page; 20 pages = up to 4000 activities.
 # scrape mode: 20 activities/page (fixed by Strava web); raise MAX_PAGES

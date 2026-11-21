@@ -61,29 +61,6 @@ test.describe("activity-detail", () => {
     expect(n >= 4, `expected >= 4 stat cards, got ${n}`).toBeTruthy();
   });
 
-  test("road-type-estimation-helpers", async () => {
-    const result = await page.evaluate(() => ({
-      paved: normalizeRoadValue("surface=asphalt"),
-      gravel: normalizeRoadValue("compacted"),
-      trail: normalizeRoadValue("footway"),
-      residential: normalizeRoadValue("residential"),
-      unknown: normalizeRoadValue(""),
-      pavedHeuristic: classifyTrackSegments([
-        {lat:50,lon:19,cum:0,ele:100,time:0,el:null},
-        {lat:50.0045,lon:19,cum:500,ele:100,time:60,el:null},
-        {lat:50.009,lon:19,cum:1000,ele:100,time:120,el:null}
-      ], "Ride")[0].type
-    }));
-    expect(result).toEqual({
-      paved: "paved",
-      gravel: "gravel",
-      trail: "trail",
-      residential: "paved",
-      unknown: "",
-      pavedHeuristic: "paved"
-    });
-  });
-
   test("strava-relative-effort-kept-as-official-score", async () => {
     const text = await page.$eval(".cards", (el) => el.textContent);
     expect(text).toContain("Strava Relative Effort121");
@@ -388,28 +365,6 @@ test.describe("activity-detail", () => {
       /km/.test(txt),
       `expected km values in gradient-distribution legend, got "${txt.slice(0, 200)}"`,
     ).toBeTruthy();
-  });
-
-  test("distribution-boxes-have-equal-size", async () => {
-    const size = await page.evaluate(() => {
-      const grade = document.getElementById("grade-dist-box");
-      const road = document.getElementById("road-dist-box");
-      if (!grade || !road ||
-          grade.style.display === "none" ||
-          road.style.display === "none") {
-        return null;
-      }
-      const g = grade.getBoundingClientRect();
-      const r = road.getBoundingClientRect();
-      return {
-        widthDelta: Math.abs(g.width - r.width),
-        heightDelta: Math.abs(g.height - r.height),
-      };
-    });
-    if (size) {
-      expect(size.widthDelta).toBeLessThanOrEqual(2);
-      expect(size.heightDelta).toBeLessThanOrEqual(2);
-    }
   });
 
   test("hr-maxavg-renders-from-samples", async () => {
