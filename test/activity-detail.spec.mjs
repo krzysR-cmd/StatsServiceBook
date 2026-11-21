@@ -61,6 +61,21 @@ test.describe("activity-detail", () => {
     expect(n >= 4, `expected >= 4 stat cards, got ${n}`).toBeTruthy();
   });
 
+  test("road-type-estimation-helpers", async () => {
+    const result = await page.evaluate(() => ({
+      paved: normalizeRoadValue("surface=asphalt"),
+      gravel: normalizeRoadValue("compacted"),
+      trail: normalizeRoadValue("footway"),
+      unknown: normalizeRoadValue(""),
+    }));
+    expect(result).toEqual({
+      paved: "paved",
+      gravel: "gravel",
+      trail: "trail",
+      unknown: "",
+    });
+  });
+
   test("strava-relative-effort-kept-as-official-score", async () => {
     const text = await page.$eval(".cards", (el) => el.textContent);
     expect(text).toContain("Strava Relative Effort121");
