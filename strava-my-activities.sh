@@ -793,15 +793,25 @@ if ls "$DETAIL_DIR"/*.json >/dev/null 2>&1; then
   : > "$TMP/road-segments-parts.ndjson"
   jq -c 'to_entries[] | {(.key): .value}' "$_road_cache" >> "$TMP/road-parts.ndjson" 2>/dev/null || :
   jq -c 'to_entries[] | {(.key): .value}' "$_road_segments_cache" >> "$TMP/road-segments-parts.ndjson" 2>/dev/null || :
+  _tab="$(printf '\t')"
+  : > "$TMP/road-pending-paths.txt"
+  _road_total=0
+  _road_cached=0
+  while IFS="$_tab" read -r _road_id _road_gpx; do
+    [ -n "$_road_id" ] || continue
+    [ -f "$WEB_DIR/$_road_gpx" ] || continue
+    _road_total=$((_road_total + 1))
+    if grep -qx "$_road_id" "$TMP/road-cached-ids.txt"; then
+      _road_cached=$((_road_cached + 1))
+    else
+      printf '%s\t%s\n' "$_road_id" "$_road_gpx" >> "$TMP/road-pending-paths.txt"
+    fi
+  done < "$TMP/road-gpx-paths.txt"
   _road_computed=0
   _road_batch=50
-  _road_total="$(wc -l < "$TMP/road-gpx-paths.txt" | tr -d ' ')"
-  _road_cached="$(wc -l < "$TMP/road-cached-ids.txt" | tr -d ' ')"
-  _road_todo=$((_road_total - _road_cached))
-  [ "$_road_todo" -lt 0 ] && _road_todo=0
+  _road_todo="$(wc -l < "$TMP/road-pending-paths.txt" | tr -d ' ')"
   [ "$_road_todo" -gt 0 ] \
     && log "render: computing road-type estimates for $_road_todo GPX activities (cached: $_road_cached)"
-  _tab="$(printf '\t')"
   while IFS="$_tab" read -r _road_id _road_gpx; do
     [ -n "$_road_id" ] || continue
     grep -qx "$_road_id" "$TMP/road-cached-ids.txt" && continue
@@ -835,9 +845,7 @@ if ls "$DETAIL_DIR"/*.json >/dev/null 2>&1; then
       fi
     fi
     rm -f "$TMP/road-osm-${_road_id}.json"
-    _road_result="$TMP/road-result-${_road_id}.json"
-    _road_segment_result="$TMP/road-segment-result-${_road_id}.json"
-    _road_json="$(awk '
+    _road_json="$(awk -v osmfile="$TMP/road-osm-ways.tsv" -v matchdist="$STRAVA_MY_ROAD_MATCH_DISTANCE" '
       BEGIN{
         n=0;paved=0;gravel=0;unpaved=0;trail=0;unknown=0;pi=3.14159265358979
         osmn=0
@@ -925,27 +933,31 @@ if ls "$DETAIL_DIR"/*.json >/dev/null 2>&1; then
           }
         }
         if(dist<=0)exit
-        printf "{\"paved\":%d,\"gravel\":%d,\"unpaved\":%d,\"trail\":%d,\"unknown\":%d}" > outtotal
-        printf "[%s]" segout > outsegments
-      }' -v osmfile="$TMP/road-osm-ways.tsv" -v matchdist="$STRAVA_MY_ROAD_MATCH_DISTANCE" -v outtotal="$_road_result" -v outsegments="$_road_segment_result" "$_road_path" 2>/dev/null)"
-    _road_json="$(cat "$_road_result" 2>/dev/null)"
-    _road_segment_json="$(cat "$_road_segment_result" 2>/dev/null)"
+        printf "{\"paved\":%d,\"gravel\":%d,\"unpaved\":%d,\"trail\":%d,\"unknown\":%d,\"segments\":[%s]}",
+          paved+0,gravel+0,unpaved+0,trail+0,unknown+0,segout
+      }' "$_road_path" 2>/dev/null)"
     case "$_road_json" in '{'*'}') ;;
       *) continue ;;
     esac
-    printf '{"%s":%s}\n' "$_road_id" "$_road_json" >> "$TMP/road-parts.ndjson"
+    _road_totals="$(printf '%s' "$_road_json" | jq -c 'del(.segments)' 2>/dev/null)" || continue
+    _road_segment_json="$(printf '%s' "$_road_json" | jq -c '.segments // []' 2>/dev/null)" || continue
+    printf '{"%s":%s}\n' "$_road_id" "$_road_totals" >> "$TMP/road-parts.ndjson"
     case "$_road_segment_json" in '['*']') printf '{"%s":%s}\n' "$_road_id" "$_road_segment_json" >> "$TMP/road-segments-parts.ndjson" ;; esac
     printf '%s\n' "$_road_id" >> "$TMP/road-cached-ids.txt"
     _road_computed=$((_road_computed+1))
     if [ $((_road_computed % 10)) -eq 0 ]; then
       log "render: road-type estimates $_road_computed/$_road_todo done"
     fi
-  done < "$TMP/road-gpx-paths.txt"
+  done < "$TMP/road-pending-paths.txt"
   jq -s 'add // {}' "$TMP/road-parts.ndjson" > "$TMP/road-types.json" 2>/dev/null || printf '{}' > "$TMP/road-types.json"
   jq -s 'add // {}' "$TMP/road-segments-parts.ndjson" > "$TMP/road-type-segments.json" 2>/dev/null || printf '{}' > "$TMP/road-type-segments.json"
   cp "$TMP/road-types.json" "$_road_cache"
   cp "$TMP/road-type-segments.json" "$_road_segments_cache"
   [ "$_road_computed" -gt 0 ] && log "render: cached road-type estimates for $_road_computed activities"
+  _road_remaining=$((_road_todo - _road_computed))
+  [ "$_road_remaining" -lt 0 ] && _road_remaining=0
+  [ "$_road_remaining" -gt 0 ] \
+    && log "render: road-type batch limit $_road_batch reached; $_road_remaining activities queued for next run"
   _hr_cache="$STATE_DIR/hr-summary.json"
   [ -f "$_hr_cache" ] || printf '{}' > "$_hr_cache"
   # Cached summaries depend only on the calculation (GPX_HR_LOGIC_VERSION). Age is
@@ -1198,9 +1210,9 @@ log "wrote $WEB_DIR/index.html, $WEB_DIR/activity.html, $WEB_DIR/stats.html and 
 # shellcheck disable=SC1090
 . "$STRAVA_LIBDIR/strava-my-html-heatmap.sh"
 
-# Batch-limited caches (climbs, HR) may still have a backlog. Don't record the
+# Batch-limited caches (climbs, speed, road types, HR) may still have a backlog. Don't record the
 # scripts hash then, so the next run isn't skipped and keeps working through it.
-if [ "${_climbs_remaining:-0}" -gt 0 ] || [ "${_ms_remaining:-0}" -gt 0 ] || [ "${_hr_remaining:-0}" -gt 0 ]; then
+if [ "${_climbs_remaining:-0}" -gt 0 ] || [ "${_ms_remaining:-0}" -gt 0 ] || [ "${_hr_remaining:-0}" -gt 0 ] || [ "${_road_remaining:-0}" -gt 0 ]; then
   rm -f "$STATE_DIR/scripts.md5"
 else
   printf '%s\n' "$_scripts_md5" > "$STATE_DIR/scripts.md5"

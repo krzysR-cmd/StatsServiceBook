@@ -348,14 +348,25 @@ jobs:
           run-number: ${{ github.run_number }}
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
+      - name: Find available test statistics files
+        id: stats-inputs
+        if: always()
+        run: |
+          {
+            printf 'files<<EOF\n'
+            for file in downloaded-results/*.json downloaded-results/*.xml downloaded-shell-report/*.xml; do
+              if [ -f "$file" ]; then
+                printf '%s\n' "$file"
+              fi
+            done
+            printf 'EOF\n'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Add format-extensible test statistics
-        if: always() && hashFiles('downloaded-results/*.json', 'downloaded-results/*.xml', 'downloaded-shell-report/*.xml') != ''
+        if: always() && steps.stats-inputs.outputs.files != ''
         uses: raczeja/test-stats-gh-pages-action@a32b79ab1dfafaf4a0146037c969758c1d9ca85d # v1.1.9
         with:
-          result-files: |
-            downloaded-results/*.json
-            downloaded-results/*.xml
-            downloaded-shell-report/*.xml
+          result-files: ${{ steps.stats-inputs.outputs.files }}
           site-directory: site
           stats-subdirectory: reusable-stats
           history-days: 30
