@@ -566,7 +566,8 @@ if ls "$DETAIL_DIR"/*.json >/dev/null 2>&1; then
         suffer_score:           (.suffer_score // null),
         calories:               (.calories // null),
         gear_id:                (.gear.id // null),
-        gpx_file:               (.gpx_file // null)
+        gpx_file:               (.gpx_file // null),
+        tcx_file:               (.tcx_file // null)
       }) as $v
     | {($fileid): $v, ($d.id | tostring): $v}'
   # Fast path: one awk pass wraps each detail file as {"__f":<stem>,"__d":<payload>},
@@ -769,6 +770,70 @@ if ls "$DETAIL_DIR"/*.json >/dev/null 2>&1; then
   [ "$_ms_remaining" -lt 0 ] && _ms_remaining=0
   [ "$_ms_remaining" -gt 0 ] \
     && log "render: max-speed batch limit $_climb_batch reached; $_ms_remaining activities queued for next run"
+  # Road-type estimates: cached per activity, batched on the router to avoid
+  # re-parsing GPX tracks when the dashboard or stats page loads.
+  _road_cache="$STATE_DIR/road-types.json"
+  [ -f "$_road_cache" ] || printf '{}' > "$_road_cache"
+  _road_sig="v1|500"
+  if [ "$(cat "$STATE_DIR/road-types.sig" 2>/dev/null)" != "$_road_sig" ]; then
+    [ "$(cat "$_road_cache")" != '{}' ] && log "render: road-type logic changed — discarding cached estimates"
+    printf '{}' > "$_road_cache"
+    printf '%s' "$_road_sig" > "$STATE_DIR/road-types.sig"
+  fi
+  jq -r 'to_entries[] | select(.value.gpx_file != null) | [.key,.value.gpx_file] | @tsv' \
+    "$TMP/enrich.json" 2>/dev/null | sort -r > "$TMP/road-gpx-paths.txt" || : > "$TMP/road-gpx-paths.txt"
+  jq -r 'keys[]' "$_road_cache" > "$TMP/road-cached-ids.txt" 2>/dev/null || : > "$TMP/road-cached-ids.txt"
+  : > "$TMP/road-parts.ndjson"
+  jq -c 'to_entries[] | {(.key): .value}' "$_road_cache" >> "$TMP/road-parts.ndjson" 2>/dev/null || :
+  _road_computed=0
+  _road_batch=50
+  _tab="$(printf '\t')"
+  while IFS="$_tab" read -r _road_id _road_gpx; do
+    [ -n "$_road_id" ] || continue
+    grep -qx "$_road_id" "$TMP/road-cached-ids.txt" && continue
+    [ "$_road_computed" -ge "$_road_batch" ] && break
+    _road_path="$WEB_DIR/$_road_gpx"
+    [ -f "$_road_path" ] || continue
+    _road_json="$(awk '
+      BEGIN{n=0;paved=0;gravel=0;unpaved=0;trail=0;unknown=0;pi=3.14159265358979}
+      function hav(la1,lo1,la2,lo2,R,dl,dn,a,c){R=6371000;dl=(la2-la1)*pi/180;dn=(lo2-lo1)*pi/180;a=sin(dl/2)*sin(dl/2)+cos(la1*pi/180)*cos(la2*pi/180)*sin(dn/2)*sin(dn/2);c=2*atan2(sqrt(a),sqrt(1-a));return R*c}
+      function epoch(s,y,m,d,h,mi,se,yy,era,yoe,doy,doe){y=substr(s,1,4)+0;m=substr(s,6,2)+0;d=substr(s,9,2)+0;h=substr(s,12,2)+0;mi=substr(s,15,2)+0;se=substr(s,18,2)+0;yy=y-(m<=2);era=int(yy/400);yoe=yy-era*400;doy=int((153*(m+(m>2?-3:9))+2)/5)+d-1;doe=yoe*365+int(yoe/4)-int(yoe/100)+doy;return (era*146097+doe-719468)*86400+h*3600+mi*60+se}
+      /lat=/{
+        s=$0;gsub(/.*lat="/,"",s);gsub(/".*$/,"",s);lat[n]=s+0
+        s=$0;gsub(/.*lon="/,"",s);gsub(/".*$/,"",s);lon[n]=s+0
+        ele[n]=0;eok[n]=0;tim[n]=0;tok[n]=0;meta[n]="";n++}
+      /<ele>/{s=$0;gsub(/.*<ele>/,"",s);gsub(/<\/ele>.*/,"",s);ele[n-1]=s+0;eok[n-1]=1}
+      /<time>/{s=$0;gsub(/.*<time>/,"",s);gsub(/<\/time>.*/,"",s);tim[n-1]=epoch(s);tok[n-1]=1}
+      /surface=/ || /tracktype=/ || /asphalt/ || /gravel/ || /dirt/ || /ground/ || /track/ || /path/ {
+        s=tolower($0);if(s~/asphalt|paved|concrete/)meta[n-1]="paved";else if(s~/gravel|compacted/)meta[n-1]="gravel";else if(s~/dirt|ground|earth|sand|grass|mud/)meta[n-1]="unpaved";else if(s~/track|path|trail|footway/)meta[n-1]="trail"}
+      END{
+        d=0;el=0;dist=0;dt=0;firste=-999;laste=-999
+        for(i=1;i<n;i++){
+          seg=hav(lat[i-1],lon[i-1],lat[i],lon[i]);d+=seg;dist+=seg
+          if(tok[i-1]&&tok[i])dt+=tim[i]-tim[i-1]
+          if(eok[i]){if(firste<-998)firste=ele[i];laste=ele[i]}
+          if(d>=500||i==n-1){
+            speed=dt>0?d/dt:0;grade=(firste>-998&&laste>-998&&d>0?(laste-firste)/d*100:0)
+            type="unknown"
+            mc=0;for(j=i-(int(d/500)+2);j<=i;j++)if(j>=0&&j<n&&meta[j]!=""&&meta[j]!=type){mc++;if(mc==1)type=meta[j]}
+            if(type=="unknown"){if(speed>=12)type="paved";else if(speed>=6)type="gravel";else type="trail"}
+            if(type=="paved")paved+=d;else if(type=="gravel")gravel+=d;else if(type=="unpaved")unpaved+=d;else if(type=="trail")trail+=d;else unknown+=d
+            d=0;dt=0;firste=-999;laste=-999
+          }
+        }
+        if(dist<=0)exit
+        printf "{\"paved\":%d,\"gravel\":%d,\"unpaved\":%d,\"trail\":%d,\"unknown\":%d}",paved+0,gravel+0,unpaved+0,trail+0,unknown+0
+      }' "$_road_path" 2>/dev/null)"
+    case "$_road_json" in '{'*'}') ;;
+      *) continue ;;
+    esac
+    printf '{"%s":%s}\n' "$_road_id" "$_road_json" >> "$TMP/road-parts.ndjson"
+    printf '%s\n' "$_road_id" >> "$TMP/road-cached-ids.txt"
+    _road_computed=$((_road_computed+1))
+  done < "$TMP/road-gpx-paths.txt"
+  jq -s 'add // {}' "$TMP/road-parts.ndjson" > "$TMP/road-types.json" 2>/dev/null || printf '{}' > "$TMP/road-types.json"
+  cp "$TMP/road-types.json" "$_road_cache"
+  [ "$_road_computed" -gt 0 ] && log "render: cached road-type estimates for $_road_computed activities"
   _hr_cache="$STATE_DIR/hr-summary.json"
   [ -f "$_hr_cache" ] || printf '{}' > "$_hr_cache"
   # Cached summaries depend only on the calculation (GPX_HR_LOGIC_VERSION). Age is
@@ -935,6 +1000,7 @@ jq -s --arg generatedAt "$GENERATED_AT" \
   --slurpfile gears "$TMP/gears.json" \
   --slurpfile climbs "$TMP/max-climbs.json" \
   --slurpfile mspd "$TMP/max-speeds.json" \
+  --slurpfile roads "$TMP/road-types.json" \
   --slurpfile assigns "$TMP/bike-assign.json" \
   --slurpfile wcache "$WEATHER_CACHE" '
   ( ($det[0] // []) | map({ (.): true }) | add // {} ) as $have
@@ -989,6 +1055,8 @@ jq -s --arg generatedAt "$GENERATED_AT" \
           suffer_score:           (.suffer_score // $e.suffer_score),
           calories:               (.calories // $e.calories),
           gpx_file:               ($e.gpx_file // null),
+          tcx_file:               ($e.tcx_file // null),
+          road_types:             (($roads[0] // {})[(.id | tostring)] // null),
           max_single_climb:       (if ($climbArr | length) > 0 then ([$climbArr[][0]] | max) else null end),
           climbs:                 (if ($climbArr | length) > 0 then ($climbArr | map({g: .[0], d: .[1]})) else null end),
           has_gps:                (if ($have[(.id | tostring)] // false) then ($gps_by_id[(.id | tostring)] // false) else null end),

@@ -347,9 +347,14 @@ while IFS= read -r base; do
     # TCX: HR + calories; also distance/time when no CSV was available.
     # Use "${base}.tcx" so both old-format and new-format names resolve correctly.
     tcx_name="${base}.tcx"
+    tcx_safe="$(printf '%s' "$tcx_name" | tr ' ' '_')"
+    tcx_local="$GPX_DIR/$tcx_safe"
+    tcx_ref="null"
     avg_hr="null"; max_hr="null"; calories="null"; avg_watts_v="null"; kj_v="null"; avg_cad_v="null"
     tcx_id="$(drive_file_id "$tcx_name")"
     if [ -n "$tcx_id" ] && drive_download "$tcx_id" "$TMP/activity.tcx" "$tcx_name" 2>/dev/null; then
+        cp "$TMP/activity.tcx" "$tcx_local"
+        tcx_ref="\"gpx/$tcx_safe\""
         _v="$(grep -o 'AverageHeartRateBpm><Value>[0-9]*</Value>' \
             "$TMP/activity.tcx" | head -1 | grep -o 'Value>[0-9]*' | grep -o '[0-9]*$' || true)"
         [ -n "$_v" ] && avg_hr="$_v"
@@ -504,6 +509,7 @@ while IFS= read -r base; do
         --argjson max_hr       "$max_hr" \
         --argjson calories     "$calories" \
         --argjson gpx_file     "$gpx_ref" \
+        --argjson tcx_file     "$tcx_ref" \
         --argjson gear_id      "$gear_id" \
         --argjson max_speed    "$max_speed_v" \
         --argjson avg_watts    "$avg_watts_v" \
@@ -526,7 +532,7 @@ while IFS= read -r base; do
           average_temp:$avg_temp, temp_source:$temp_src,
           apparent_temp:$apparent_temp, wind_speed:$wind_speed, wind_dir:$wind_dir,
           weathercode:$weathercode, precipitation:$precipitation,
-          suffer_score:null, calories:$calories, gpx_file:$gpx_file, dual_source:false}' >> "$STORE"
+          suffer_score:null, calories:$calories, gpx_file:$gpx_file, tcx_file:$tcx_file, dual_source:false}' >> "$STORE"
 
     printf '%s\n' "$act_id" >> "$TMP/known_ids.txt"
     ADDED=$((ADDED + 1))
@@ -707,7 +713,9 @@ jq -s \
         suffer_score:         null,
         calories:             .calories,
         gpx_file:             .gpx_file,
-        has_gps:              ((.gpx_file // "") | length) > 0,
+        tcx_file:             .tcx_file,
+        road_types:           null,
+        has_gps:              ((((.gpx_file // "") | length) > 0) or (((.tcx_file // "") | length) > 0)),
         detail:               true
       }
     ] | sort_by(.date) | reverse

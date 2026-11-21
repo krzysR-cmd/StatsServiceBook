@@ -106,6 +106,13 @@ svg.bar{width:100%;display:block}
 .goal-week-num{color:var(--text-5);font-size:.67rem;white-space:nowrap}
 .goal-week.wk-current{outline:1px solid var(--accent);outline-offset:2px;border-radius:2px}
 .goal-week-current{color:var(--accent);font-size:.6rem;font-weight:700;margin-left:.25rem}
+.road-dist-wrap{display:flex;align-items:center;gap:.8rem 1rem;flex-wrap:wrap}
+.road-dist-wrap svg{width:150px;height:150px;flex:0 0 auto}
+.road-dist-legend{display:flex;flex-direction:column;gap:.3rem;font-size:.76rem;color:var(--text-2);min-width:180px}
+.road-dist-row{display:flex;align-items:center;gap:.4rem}
+.road-dist-row i{width:.8rem;height:.8rem;border-radius:2px}
+.road-dist-row .lbl{flex:1}
+.road-dist-row .val{color:var(--text-3);font-variant-numeric:tabular-nums}
 .wk-hit .goal-week-fill{background:#22c55e}
 .wk-cur .goal-week-fill{background:#fb923c}
 .wk-past .goal-week-fill{background:#60a5fa}
@@ -184,6 +191,11 @@ svg.bar{width:100%;display:block}
 <div class="sec" data-sid="sport">
 <h2>By sport <span id="sportSubtitle" class="muted" style="font-size:.78rem;font-weight:400;text-transform:none">&mdash; all time</span></h2>
 <div id="sportTable"></div>
+</div>
+
+<div class="sec" data-sid="road-types" id="road-types-section" style="display:none">
+<h2>Road type distribution <span class="muted" style="font-size:.78rem;font-weight:400;text-transform:none">&mdash; estimated from GPX/TCX</span></h2>
+<div class="chart-box"><div class="road-dist-wrap"><svg id="statsRoadSvg" viewBox="0 0 150 150"></svg><div class="road-dist-legend" id="statsRoadLegend"></div></div></div>
 </div>
 
 <div class="sec" data-sid="dow">
@@ -298,6 +310,44 @@ function agg(list){
   var distM=0,secs=0,elev=0;
   list.forEach(function(a){ distM+=(a.distance||0); secs+=(a.moving_time||0); elev+=(a.total_elevation_gain||0); });
   return {n:list.length, distM:distM, secs:secs, elev:elev};
+}
+
+function renderRoadTypes(list){
+  var section=document.getElementById("road-types-section");
+  var svg=document.getElementById("statsRoadSvg");
+  var leg=document.getElementById("statsRoadLegend");
+  if(!section||!svg||!leg)return;
+  var labels=[
+    ["paved","Paved","#ef6c00"],["gravel","Gravel","#8d6e63"],
+    ["unpaved","Unpaved","#795548"],["trail","Trail","#388e3c"],
+    ["unknown","Unknown","#9e9e9e"]
+  ];
+  var totals={paved:0,gravel:0,unpaved:0,trail:0,unknown:0}, total=0, i;
+  list.forEach(function(a){
+    if(!a.road_types)return;
+    for(i=0;i<labels.length;i++){var k=labels[i][0],m=a.road_types[k]||0;totals[k]+=m;total+=m;}
+  });
+  if(total<=0){section.style.display="none";return;}
+  var cx=75,cy=75,r=52,sw=22,C=2*Math.PI*r,off=0,parts="";
+  for(i=0;i<labels.length;i++){
+    var frac=(totals[labels[i][0]]||0)/total;
+    if(frac<=0)continue;
+    var dash=frac*C,gap=C-dash;
+    parts+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+labels[i][2]
+     +'" stroke-width="'+sw+'" stroke-dasharray="'+dash.toFixed(2)+' '+gap.toFixed(2)
+     +'" stroke-dashoffset="'+(-off*C).toFixed(2)+'" transform="rotate(-90 '+cx+' '+cy+')">'
+      +'<title>'+labels[i][1]+': '+((totals[labels[i][0]]||0)/1000).toFixed(1)+' km</title></circle>';
+    off+=frac;
+  }
+  parts+='<text x="'+cx+'" y="'+(cy-2)+'" text-anchor="middle" font-size="17" font-weight="600" fill="currentColor">'+(total/1000).toFixed(1)+'</text>';
+  parts+='<text x="'+cx+'" y="'+(cy+13)+'" text-anchor="middle" font-size="9" fill="var(--text-4)">km total</text>';
+  svg.innerHTML=parts;
+  leg.innerHTML=labels.map(function(x){
+    var m=totals[x[0]]||0;
+    if(m<=0)return "";
+    return '<div class="road-dist-row"><i style="background:'+x[2]+'"></i><span class="lbl">'+x[1]+'</span><span class="val">'+(m/1000).toFixed(1)+' km</span></div>';
+  }).join("");
+  section.style.display="";
 }
 function sortedYears(acts){
   var s={};
@@ -1261,6 +1311,7 @@ function render(){
   }).join("");
   document.getElementById("sportTable").innerHTML=
     '<table><thead>'+stHead+'</thead><tbody>'+stRows+'</tbody></table>';
+  renderRoadTypes(fyAll);
 
   // --- Day of week (all time, selected sport) ---
   var dowKm=[0,0,0,0,0,0,0], dowN=[0,0,0,0,0,0,0];
@@ -1359,7 +1410,7 @@ load();
 window.onDataChanged=function(){ load(true); };
 (function(){
   var STATS_SEC_KEY='ssb-stats-sec';
-  var STATS_SEC_DEFAULT=['kpis','last-year','goals','weekly-goals','records','top10','year','monthly-chart','monthly-table','comparison','sport','dow'];
+  var STATS_SEC_DEFAULT=['kpis','last-year','goals','weekly-goals','records','top10','year','monthly-chart','monthly-table','comparison','sport','road-types','dow'];
   var wrap=document.getElementById('sec-wrap');
   if(!wrap)return;
   var dragSrc=null;
