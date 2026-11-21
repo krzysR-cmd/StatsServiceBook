@@ -714,7 +714,6 @@ jq -s \
         calories:             .calories,
         gpx_file:             .gpx_file,
         tcx_file:             .tcx_file,
-        road_types:           null,
         has_gps:              ((((.gpx_file // "") | length) > 0) or (((.tcx_file // "") | length) > 0)),
         detail:               true
       }

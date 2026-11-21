@@ -3,6 +3,7 @@
 #
 # Run from anywhere (uses $PSScriptRoot):
 #   powershell -ExecutionPolicy Bypass -File test\run-tests.ps1
+#   powershell -ExecutionPolicy Bypass -File test\run-tests.ps1 -ParallelWorkers 4
 #
 # Optional: pass a single spec file name to run just that suite:
 #   powershell -ExecutionPolicy Bypass -File test\run-tests.ps1 heatmap.spec.mjs
@@ -10,7 +11,9 @@
 # Requires: Podman (running machine), Node.js >= 18.
 
 param(
-    [string]$Spec = ""
+    [string]$Spec = "",
+    [ValidateRange(1, 32)]
+    [int]$ParallelWorkers = 3
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,10 +80,11 @@ New-Item -ItemType Directory -Force $TmpDir | Out-Null
 Write-Host "==> Playwright dir: $TmpDir"
 Push-Location $TmpDir
 try {
-    if (-not (Test-Path (Join-Path $TmpDir 'node_modules\.bin\playwright'))) {
-        Write-Host "==> Installing @playwright/test ..."
+    if (-not (Test-Path (Join-Path $TmpDir 'node_modules\.bin\playwright')) -or
+        -not (Test-Path (Join-Path $TmpDir 'node_modules\v8-to-istanbul'))) {
+        Write-Host "==> Installing Playwright dependencies ..."
         & npm init -y 2>&1 | Out-Null
-        & npm install --save-dev @playwright/test 2>&1 | Where-Object { $_ -match 'added|warn|error' }
+        & npm install --save-dev @playwright/test v8-to-istanbul@9.3.0 2>&1 | Where-Object { $_ -match 'added|warn|error' }
         if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
         Write-Host "==> Installing Chromium ..."
         & npx playwright install chromium 2>&1 | Select-Object -Last 5
@@ -100,10 +104,28 @@ try {
     $env:TEST_HOST = $TestHost
     if ($Spec) {
         & npx playwright test $Spec
+        $PlaywrightExit = $LASTEXITCODE
     } else {
-        & npx playwright test
+        $BlobDir = Join-Path $TmpDir ("blob-reports-" + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Force $BlobDir | Out-Null
+
+        Write-Host "==> Running parallel-safe Playwright specs ($ParallelWorkers workers) ..."
+        $env:PLAYWRIGHT_BLOB_OUTPUT_FILE = Join-Path $BlobDir 'parallel.zip'
+        & npx playwright test --project=parallel "--workers=$ParallelWorkers" --reporter=blob
+        $ParallelExit = $LASTEXITCODE
+
+        Write-Host "==> Running shared-CGI Playwright specs (1 worker) ..."
+        $env:PLAYWRIGHT_BLOB_OUTPUT_FILE = Join-Path $BlobDir 'serial.zip'
+        & npx playwright test --project=serial --workers=1 --reporter=blob
+        $SerialExit = $LASTEXITCODE
+
+        Remove-Item Env:PLAYWRIGHT_BLOB_OUTPUT_FILE -ErrorAction SilentlyContinue
+        Write-Host "==> Merging Playwright reports ..."
+        & npx playwright merge-reports --config playwright.merge.config.mjs $BlobDir
+        $MergeExit = $LASTEXITCODE
+
+        $PlaywrightExit = if ($ParallelExit -ne 0 -or $SerialExit -ne 0 -or $MergeExit -ne 0) { 1 } else { 0 }
     }
-    $PlaywrightExit = $LASTEXITCODE
     Remove-Item Env:TEST_PORT -ErrorAction SilentlyContinue
     Remove-Item Env:TEST_HOST -ErrorAction SilentlyContinue
 

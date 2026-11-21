@@ -1205,7 +1205,6 @@ test.describe("stats-section-order", () => {
       "monthly-table",
       "comparison",
       "sport",
-      "road-types",
       "dow",
     ];
     expect(sids, `sections: ${JSON.stringify(sids)}`).toEqual(expected);
