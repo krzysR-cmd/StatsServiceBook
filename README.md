@@ -183,7 +183,7 @@ The bike tracker also has forms for logging service, replacing or moving a part,
 | :--------------------------------------------------------------------------------------------------------------------------------: |
 | ![Club leaderboard dark](https://raw.githubusercontent.com/raczeja/StatsServiceBook/main/test/screenshots/club-dashboard-dark.png) |
 
-> Screenshots are generated from sample data with `powershell -File test/make-screenshots.ps1` (Podman required). To capture them manually, run `node test/screenshot.mjs <output-dir>` against a running test container.
+> Screenshots are generated from sample data. On each version-tag release, CI refreshes the screenshots from the tagged code and commits the results to the default branch. To refresh them on demand, manually run the CI workflow with **Refresh screenshots** enabled; the selected ref is captured and its screenshots are committed to the default branch. Main page screenshots show the full page; modal and feature-detail screenshots remain focused crops. To capture them locally, run `powershell -File test/make-screenshots.ps1` (Podman required), or run `node test/screenshot.mjs <output-dir>` against a running test container.
 
 ## Quick start
 

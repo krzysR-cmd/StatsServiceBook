@@ -46,9 +46,9 @@ async function setTheme(page, url, dark) {
   }, dark);
 }
 
-async function shot(page, name) {
+async function shot(page, name, fullPage = false) {
   const file = path.join(outDir, `${name}.png`);
-  await page.screenshot({ path: file, fullPage: false });
+  await page.screenshot({ path: file, fullPage });
   console.log(`  saved ${file}`);
 }
 
@@ -111,7 +111,7 @@ try {
       await page.goto(url, { waitUntil: "networkidle", timeout: 45000 });
     }
 
-    await shot(page, name);
+    await shot(page, name, true);
   }
 
   // ── Bike-service modal screenshots (light mode) ──────────────────────────────
