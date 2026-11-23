@@ -10,6 +10,12 @@ on:
   schedule:
     - cron: "0 6 * * 1" # Every Monday at 06:00 UTC
   workflow_dispatch:
+    inputs:
+      refresh_screenshots:
+        description: "Regenerate screenshots from this ref and update the default branch"
+        required: false
+        default: false
+        type: boolean
 
 env:
   IMAGE: jraczek/statsservicebook
@@ -289,6 +295,85 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
           repository: ${{ env.IMAGE }}
           readme-filepath: README.md
+
+  refresh-release-screenshots:
+    name: Refresh screenshots
+    runs-on: ubuntu-latest
+    needs: functional-tests
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.refresh_screenshots)
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+
+      - name: Build test container
+        run: |
+          docker build -t stravame-prod .
+          docker build -f test/Containerfile --build-arg BASE=stravame-prod -t stravame-test .
+
+      - name: Start screenshot server
+        run: |
+          docker run -d --name stravame-screenshots -p 8080:8080 stravame-test
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/strava/me/index.html >/dev/null; then
+              echo "server ready"
+              exit 0
+            fi
+            echo "waiting for screenshot server... ($i)"
+            sleep 1
+          done
+          docker logs stravame-screenshots || true
+          exit 1
+
+      - name: Capture full-page screenshots
+        run: |
+          TOOLS_DIR="$RUNNER_TEMP/strava-screenshot-tools"
+          OUTPUT_DIR="$RUNNER_TEMP/generated-screenshots"
+          mkdir -p "$TOOLS_DIR" "$OUTPUT_DIR"
+          cd "$TOOLS_DIR"
+          npm init -y >/dev/null
+          npm install --save-dev @playwright/test >/dev/null
+          npx playwright install chromium --with-deps
+          cp "$GITHUB_WORKSPACE/test/screenshot.mjs" .
+          TEST_PORT=8080 TEST_HOST=localhost node screenshot.mjs "$OUTPUT_DIR"
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+
+      - name: Stop screenshot server
+        if: always()
+        run: |
+          docker stop stravame-screenshots || true
+          docker rm stravame-screenshots || true
+
+      - name: Checkout default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: default-branch
+
+      - name: Commit refreshed screenshots
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_REF: ${{ github.ref_name }}
+        run: |
+          cp -a "$RUNNER_TEMP/generated-screenshots/." default-branch/test/screenshots/
+          cd default-branch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add test/screenshots
+          if git diff --cached --quiet; then
+            echo "Screenshots are already up to date."
+            exit 0
+          fi
+          git commit -m "docs: refresh screenshots ($SOURCE_REF)"
+          git push origin "HEAD:$DEFAULT_BRANCH"
 
   deploy-report:
     needs: functional-tests
